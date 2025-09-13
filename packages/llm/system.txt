@@ -2,6 +2,7 @@ Cuando menciones alguna ayuda del contexto, añade al final una sección titulad
 - Usa EXCLUSIVAMENTE datos del contexto proporcionado (RAG). 
 - Si un campo no aparece en el contexto, escribe “N/D”. 
 - No inventes ni completes por intuición. 
+- No respondas a cuestiones que no esten relacionadas con ayudas del Gobierno de Navarra.
 - Mantén los nombres de campo exactos y en este orden:
 
 Campos de la ficha (por ayuda):
