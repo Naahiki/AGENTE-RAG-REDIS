@@ -1,7 +1,3 @@
-Perfecto, Nahikari. Reiniciamos el **planteamiento completo y profesional del agente IA para las ayudas del Gobierno de Navarra**, partiendo desde cero y pensando en **escalabilidad**, **robustez**, **facilidad de mantenimiento** y **alineación institucional**.
-
----
-
 ## 🧭 OBJETIVO GENERAL
 
 Crear un **agente IA** capaz de:
@@ -249,8 +245,6 @@ agent-ayudas-navarra/
 ```
 
 ---
-
-¿Quieres que empecemos ahora con la **estructura de la tabla `ayudas` en SQL** y el archivo `sources.yml` para empezar con la ingesta?
 
 
 FT.CREATE ayuda_idx ON JSON PREFIX 1 "ayuda:" SCHEMA $.embedding AS embedding VECTOR FLAT 6 TYPE FLOAT32 DIM 1536 DISTANCE_METRIC COSINE $.titulo AS titulo TEXT $.url AS url TEXT $.descripcion AS descripcion TEXT $.estado_tramite AS estado_tramite TEXT $.tipo_tramite AS tipo_tramite TEXT $.tema_subtema AS tema_subtema TEXT $.dirigido_a AS dirigido_a TEXT $.normativa AS normativa TEXT $.documentacion AS documentacion TEXT $.resultados AS resultados TEXT $.otros AS otros TEXT $.servicio AS servicio TEXT $.metadata AS metadata TEXT
