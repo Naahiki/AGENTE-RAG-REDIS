@@ -1,0 +1,123 @@
+{
+  "id": "b9f72178-ea77-45a1-9406-d3044dbd3bc6",
+  "prevId": "3cd300b8-f219-40d3-8da1-240582d44f60",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.ayudas": {
+      "name": "ayudas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "estado_tramite": {
+          "name": "estado_tramite",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tipo_tramite": {
+          "name": "tipo_tramite",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tema_subtema": {
+          "name": "tema_subtema",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dirigido_a": {
+          "name": "dirigido_a",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "descripcion": {
+          "name": "descripcion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "normativa": {
+          "name": "normativa",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "documentacion": {
+          "name": "documentacion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "url_oficial": {
+          "name": "url_oficial",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resultados": {
+          "name": "resultados",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "otros": {
+          "name": "otros",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "servicio": {
+          "name": "servicio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "hash_contenido": {
+          "name": "hash_contenido",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

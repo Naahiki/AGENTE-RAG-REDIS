@@ -1,0 +1,10 @@
+{
+  "name": "@agent-rag/sources",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./schemas": "./neon/schemas/index.ts"
+  },
+  "files": ["neon/schemas"]
+}

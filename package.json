@@ -1,0 +1,31 @@
+{
+  "name": "agente-rag",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.1",
+    "@upstash/redis": "^1.35.3",
+    "dotenv": "^17.2.2",
+    "drizzle-orm": "^0.44.5",
+    "js-yaml": "^4.1.0",
+    "openai": "^5.20.1",
+    "redis": "^5.8.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@agent-rag/memory": "workspace:*",
+    "@agent-rag/llm": "workspace:*",
+	"@agent-rag/sources": "workspace:*",
+    "@agent-rag/cache": "workspace:*",
+    "@agent-rag/retriever": "workspace:*",
+    "@agent-rag/core": "workspace:*",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.3.1",
+    "drizzle-kit": "^0.31.4",
+    "tsx": "^4.20.5"
+  }
+}

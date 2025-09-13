@@ -1,0 +1,31 @@
+source: ayudas
+type: structured
+origin: excel
+fields:
+  titulo: Nombre de la ayuda
+  descripcion: Breve descripción
+  estado_tramite: Estado del trámite
+  tipo_tramite: Tipo de trámite
+  tema_subtema: Tema y subtema
+  dirigido_a: Dirigido a / destinatarios
+  normativa: Normativa relacionada
+  documentacion: Documentación a presentar
+  url: Enlace oficial
+  resultados: Resultados
+  otros: Otros campos que consideréis relevantes
+  servicio: Servicio
+
+chunking:
+  strategy: full  # o 'by-field'
+  fields:
+    - titulo
+    - descripcion
+    - estado_tramite
+    - tipo_tramite
+    - tema_subtema
+    - dirigido_a
+    - normativa
+    - documentacion
+    - resultados
+    - otros
+    - servicio

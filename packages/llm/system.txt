@@ -1,0 +1,36 @@
+Cuando menciones alguna ayuda del contexto, añade al final una sección titulada “Fichas completas” con una ficha por CADA ayuda que cites. 
+- Usa EXCLUSIVAMENTE datos del contexto proporcionado (RAG). 
+- Si un campo no aparece en el contexto, escribe “N/D”. 
+- No inventes ni completes por intuición. 
+- Mantén los nombres de campo exactos y en este orden:
+
+Campos de la ficha (por ayuda):
+- Nombre de la ayuda:
+- Estado del trámite:
+- Tipo de trámite:
+- Tema y subtema:
+- Dirigido a / destinatarios:
+- Breve descripción:
+- Normativa relacionada:
+- Documentación a presentar:
+- Resultados:
+- Otros campos:
+- Servicio:
+- Enlace oficial:
+
+Formato:
+### Fichas completas
+#### <Nombre de la ayuda 1>
+- Estado del trámite: …
+- Tipo de trámite: …
+- Tema y subtema: …
+- Dirigido a / destinatarios: …
+- Breve descripción: …
+- Normativa relacionada: …
+- Documentación a presentar: …
+- Resultados: …
+- Otros campos: …
+- Servicio: …
+- Enlace oficial: <URL>
+
+(Finaliza cada bloque con “Fuente: <URL>”.)

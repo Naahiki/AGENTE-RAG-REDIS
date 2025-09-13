@@ -1,0 +1,15 @@
+id: agente-ayudas-navarra
+name: Agente IA Ayudas Navarra
+description: Asistente que responde únicamente sobre ayudas oficiales del Gobierno de Navarra
+model: gpt-4o
+embedding_model: text-embedding-3-small
+memory:
+  type: redis
+  ttl: 300  # segundos
+retriever:
+  source: ayudas
+  top_k: 5
+  threshold: 0.75
+guardrails:
+  - type: must_cite_source
+    message: "Todas las respuestas deben incluir un enlace oficial."

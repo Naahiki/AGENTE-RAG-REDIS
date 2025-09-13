@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1757625543907,
+      "tag": "0000_skinny_bill_hollister",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1757626006117,
+      "tag": "0001_careless_triathlon",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1757693361560,
+      "tag": "0002_freezing_mastermind",
+      "breakpoints": true
+    }
+  ]
+}
