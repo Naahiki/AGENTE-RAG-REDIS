@@ -340,3 +340,63 @@ export async function touchChatSession(chatId: string) {
     .set({ last_activity_at: new Date() })
     .where(eq(chatSessions.chat_id, chatId));
 }
+
+
+// -------------------------------------------------------------
+// Perfil de usuario en chat_sessions.meta.profile (JSONB)
+// -------------------------------------------------------------
+
+export type UserProfile = {
+  company_size?: string;  // texto libre
+  sector?: string;        // texto libre
+  objective?: string;     // texto libre
+};
+
+/**
+ * Mergea (upsert) el patch dentro de chat_sessions.meta.profile
+ * - Crea la fila si no existe
+ * - No pisa claves existentes: hace profile := profile || patch
+ */
+export async function saveProfilePatch(
+  chatId: string,
+  patch: Partial<UserProfile>,
+  userId?: string | null
+) {
+  if (!patch || Object.keys(patch).length === 0) return;
+
+  await db
+    .insert(chatSessions)
+    .values({
+      chat_id: chatId,
+      user_id: userId ?? null,
+      // si se crea por primera vez, guarda directamente { profile: patch }
+      meta: { profile: patch } as any,
+    })
+    .onConflictDoUpdate({
+      target: chatSessions.chat_id,
+      set: {
+        user_id: userId ?? null,
+        last_activity_at: new Date(),
+        // meta = jsonb_set( coalesce(meta,'{}'), '{profile}', coalesce(meta->'profile','{}') || patch, true )
+        meta: sql`jsonb_set(
+          coalesce(${chatSessions.meta}, '{}'::jsonb),
+          '{profile}',
+          coalesce(${chatSessions.meta}->'profile','{}'::jsonb) || ${JSON.stringify(patch)}::jsonb,
+          true
+        )`,
+      },
+    });
+}
+
+/** Devuelve el profile guardado o null si no existe */
+export async function getProfile(chatId: string): Promise<UserProfile | null> {
+  const rows = await db
+    .select({ meta: chatSessions.meta })
+    .from(chatSessions)
+    .where(eq(chatSessions.chat_id, chatId))
+    .limit(1);
+
+  const meta = rows[0]?.meta as Record<string, any> | undefined;
+  const profile = meta?.profile;
+  return profile ? (profile as UserProfile) : null;
+}

@@ -3,7 +3,8 @@ export type GuardrailType =
   | "VAGUE_QUERY"
   | "OUT_OF_SCOPE"
   | "LLM_TIMEOUT"
-  | "URL_STRIPPED";
+  | "URL_STRIPPED"
+  | "GREETING";  
 
 export interface Detection {
   triggered: GuardrailType[];

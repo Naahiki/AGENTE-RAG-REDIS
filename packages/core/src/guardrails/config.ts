@@ -14,4 +14,11 @@ export const GUARD_cfg = {
     ? new RegExp(process.env.GUARD_OUT_OF_SCOPE_REGEX, "i")
     : null,
   requireUrlWhitelist: toBool(process.env.GUARD_REQUIRE_URL_WHITELIST, true),
+  // 👇 nuevo: saludo configurable
+  greetingRegex: new RegExp(
+    process.env.GUARD_GREETING_REGEX ||
+      // hola, buenas, qué tal, hello, hi, etc.
+      "\\b(hola+|buenas+|buenos dias|buenas tardes|buenas noches|qué tal|que tal|hello|hi)\\b",
+    "i"
+  ),
 };

@@ -1,59 +1,67 @@
-// packages/core/src/guardrails/apply.ts
 import { GUARD_cfg } from "./config";
-import { guardrailMsgs } from "./messages";
 import type { PostProcessOutcome } from "./types";
 
-function normalizeUrl(u: string) {
+function normalize(u: string) {
   return u.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
-// ✅ NUEVO: normalizador de texto para checks de ámbito
-function normText(s: string) {
-  return (s || "")
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-}
-
-/** ✅ NUEVO: post-LLM scope guard. Si huele a fuera de ámbito -> sustituye la respuesta. */
-export function enforceScopeAfterLLM(
-  userText: string,
-  content: string
-): { content: string; overridden: boolean } {
-  if (!GUARD_cfg.enabled) return { content, overridden: false };
-
-  // Si no hay regex configurado, no forzamos nada
-  if (!GUARD_cfg.outOfScopeRegex) return { content, overridden: false };
-
-  const u = normText(userText);
-  const c = normText(content);
-
-  if (GUARD_cfg.outOfScopeRegex.test(u) || GUARD_cfg.outOfScopeRegex.test(c)) {
-    return { content: guardrailMsgs.OUT_OF_SCOPE, overridden: true };
-  }
-  return { content, overridden: false };
-}
-
-export function enforceUrlWhitelist(
-  content: string,
-  allowed: string[]
-): PostProcessOutcome {
+export function enforceUrlWhitelist(content: string, allowed: string[]): PostProcessOutcome {
   if (!GUARD_cfg.enabled || !GUARD_cfg.requireUrlWhitelist) {
     return { content, strippedUrls: [] };
   }
-
-  const allowedNorm = new Set(allowed.map(normalizeUrl));
+  const allowedNorm = new Set(allowed.map(normalize));
   const urlRegex = /\bhttps?:\/\/[^\s)\]]+/gi;
-
   const stripped: string[] = [];
   const out = content.replace(urlRegex, (match) => {
-    const ok = allowed.includes(match) || allowedNorm.has(normalizeUrl(match));
+    const ok = allowed.includes(match) || allowedNorm.has(normalize(match));
     if (!ok) {
       stripped.push(match);
-      return ""; // elimina la URL no permitida
+      return "";
     }
     return match;
   });
-
   return { content: out, strippedUrls: stripped };
+}
+
+// NEW: refuerzo post-LLM (sobre contenido)
+export function enforceScopeAfterLLM(
+  userQuery: string,
+  content: string,
+  docsLen: number
+): { content: string; overridden: boolean } {
+  if (!GUARD_cfg.enabled) return { content, overridden: false };
+
+  // Si el query ya cae en denylist, override
+  if (GUARD_cfg.outOfScopeRegex && GUARD_cfg.outOfScopeRegex.test(userQuery)) {
+    return {
+      content:
+        "Puedo ayudarte con ayudas del Gobierno de Navarra. Si buscas algo distinto, dime y te indico por dónde seguir.",
+      overridden: true,
+    };
+  }
+
+  // Si el contenido “huele” a fuera de ámbito (p. ej., recetas) => override
+  if (GUARD_cfg.outOfScopeRegex && GUARD_cfg.outOfScopeRegex.test(content)) {
+    return {
+      content:
+        "Puedo ayudarte con ayudas del Gobierno de Navarra. Si buscas algo distinto, dime y te indico por dónde seguir.",
+      overridden: true,
+    };
+  }
+
+  // Si usamos allowlist: sin RAG y query no coincide con allowlist => override
+//   if (
+//     GUARD_cfg.useAllowlist &&
+//     GUARD_cfg.allowlistRegex &&
+//     docsLen < (GUARD_cfg.ragMinDocs || 1) &&
+//     !GUARD_cfg.allowlistRegex.test(userQuery)
+//   ) {
+//     return {
+//       content:
+//         "Puedo ayudarte con ayudas del Gobierno de Navarra. Para afinar, dime tamaño de empresa, sector y objetivo (contratar / invertir / digitalizar / energía / internacionalizar).",
+//       overridden: true,
+//     };
+//   }
+
+  return { content, overridden: false };
 }

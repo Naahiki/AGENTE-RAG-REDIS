@@ -4,4 +4,5 @@ export const guardrailMsgs = {
   OUT_OF_SCOPE: `Puedo ayudarte con ayudas del Gobierno de Navarra. Si buscas algo distinto, dime y te indico por dónde seguir.`,
   VAGUE_QUERY: `Para recomendar bien, necesito: tamaño de empresa, sector y objetivo. ¿Me los das?`,
   URL_STRIPPED_SUFFIX: `\n\n(He limpiado referencias no verificadas; abajo solo verás fuentes mostradas).`,
+  GREETING: `¡Hola! 👋 Puedo ayudarte a encontrar ayudas del Gobierno de Navarra. Cuéntame tu caso o el nombre de una ayuda; si quieres afinar: tamaño de empresa, sector y objetivo.`
 } as const;
