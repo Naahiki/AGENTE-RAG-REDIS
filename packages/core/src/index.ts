@@ -19,8 +19,8 @@ import {
   getLongSummary, // usado indirectamente por LLM si no hay history
   setShortSummary,
   appendTurn,
-  ensureChatSession,      // sesión en Neon
-  touchChatSession,       // marca actividad
+  ensureChatSession, // sesión en Neon
+  touchChatSession, // marca actividad
   MEMORY_AUDIT_TO_NEON_ENABLED,
   MEMORY_AUDIT_MESSAGE_SOURCES_ENABLED,
   RetrievalRecord,
@@ -33,10 +33,15 @@ import {
 
 const VERBOSE = process.env.CORE_VERBOSE === "1";
 if (VERBOSE) {
-  console.log(`[core] audit->neon: ${MEMORY_AUDIT_TO_NEON_ENABLED ? "ON" : "OFF"}`);
-  console.log(`[core] message_sources: ${MEMORY_AUDIT_MESSAGE_SOURCES_ENABLED ? "ON" : "OFF"}`);
+  console.log(
+    `[core] audit->neon: ${MEMORY_AUDIT_TO_NEON_ENABLED ? "ON" : "OFF"}`
+  );
+  console.log(
+    `[core] message_sources: ${
+      MEMORY_AUDIT_MESSAGE_SOURCES_ENABLED ? "ON" : "OFF"
+    }`
+  );
 }
-
 
 /** Envuelve una promesa con timeout y etiqueta para logs */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -66,7 +71,11 @@ export async function handleTurn(
 
     // 1) Cache exacta
     if (VERBOSE) console.time(`[core] cache:get`);
-    const cached = await withTimeout(getCachedAnswer(message), 3000, "cache:get");
+    const cached = await withTimeout(
+      getCachedAnswer(message),
+      3000,
+      "cache:get"
+    );
     if (VERBOSE) console.timeEnd(`[core] cache:get`);
     if (cached) {
       if (VERBOSE) console.log(`[core] HIT cache`);
@@ -113,16 +122,20 @@ export async function handleTurn(
     // --- Fuentes ricas para auditoría ---
     // a) URLs únicas "planas" para la UI
     const sourceUrls = Array.from(
-      new Set((docs || []).map((d: any) => d.url ?? d.url_oficial).filter(Boolean))
+      new Set(
+        (docs || []).map((d: any) => d.url ?? d.url_oficial).filter(Boolean)
+      )
     );
 
     // b) Registros ricos por fuente (para Neon.message_sources)
-    const retrievalRecords: RetrievalRecord[] = (docs || []).map((d: any, i: number) => ({
-      url: (d.url ?? d.url_oficial ?? "") as string,
-      rank: i + 1,
-      score: (d._score ?? d.score ?? null) as number | null,
-      raw_chunk: d ? (d as Record<string, any>) : null,
-    }));
+    const retrievalRecords: RetrievalRecord[] = (docs || []).map(
+      (d: any, i: number) => ({
+        url: (d.url ?? d.url_oficial ?? "") as string,
+        rank: i + 1,
+        score: (d._score ?? d.score ?? null) as number | null,
+        raw_chunk: d ? (d as Record<string, any>) : null,
+      })
+    );
 
     // c) IDs ligeros para compatibilidad con el tipo antiguo { topK, ids }
     const retrievalIds: Array<string | number> = (docs || [])
@@ -209,6 +222,16 @@ export async function handleTurn(
       content = fallbackFromChunks();
     }
 
+    // a.1) Detecta cuáles salieron realmente en la respuesta
+    const norm = (u: string) =>
+      u.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const shownSourcesRaw = sourceUrls.filter((u) => {
+      const clean = norm(u);
+      return content.includes(u) || content.includes(clean);
+    });
+    // si no detectamos ninguna pero sí hubo recuperadas, opcionalmente usa todas
+    const shownSources = shownSourcesRaw.length ? shownSourcesRaw : sourceUrls;
+
     // 5) Persistencias
     if (VERBOSE) console.time(`[core] persist`);
 
@@ -216,6 +239,7 @@ export async function handleTurn(
     await appendTurn(chatId, message, content, {
       // Para UI:
       sources: sourceUrls,
+      shownSources,
       // Para tipos antiguos (evita el error TS 2559):
       retrieval: { topK: RETRIEVER_TOP_K, ids: retrievalIds },
       // Para auditoría rica (message_sources):
@@ -227,8 +251,12 @@ export async function handleTurn(
     });
 
     // Resumen breve (cada N turnos)
-    if (!shortSummary || history.length % UPDATE_SHORT_SUMMARY_EVERY_TURNS === 0) {
-      const compact = message.length > 120 ? message.slice(0, 117) + "..." : message;
+    if (
+      !shortSummary ||
+      history.length % UPDATE_SHORT_SUMMARY_EVERY_TURNS === 0
+    ) {
+      const compact =
+        message.length > 120 ? message.slice(0, 117) + "..." : message;
       await setShortSummary(chatId, `Tema reciente: ${compact}`);
     }
 

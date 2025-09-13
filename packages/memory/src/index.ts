@@ -55,7 +55,8 @@ export type ChatAuditMeta = {
   retrieval?:
     | { topK?: number; ids?: Array<string | number> }
     | RetrievalRecord[];
-  retrievalRecords?: RetrievalRecord[]; // 👈 preferente para poblar message_sources
+  retrievalRecords?: RetrievalRecord[];
+  shownSources?: string[];
   retrieverTopK?: number;
   usedRetriever?: boolean;
   model?: string;

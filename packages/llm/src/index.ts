@@ -6,12 +6,12 @@ export { loadSystemPromptFromLLM } from "./system";
 
 import OpenAI from "openai";
 import { buildMessages } from "./prompt";
-import { getLongSummary, upsertLongSummary, getMemoryAsMessages } from "../../memory/src";
+import { getLongSummary, upsertLongSummary, getMemoryAsMessages, getRecentTurns } from "../../memory/src";
 
 const CHAT_MODEL = process.env.CHAT_MODEL || "gpt-4o-mini";
 const DISTILL_EVERY_TURNS = parseInt(process.env.DISTILL_EVERY_TURNS || "12", 10);
 
-// 👇 nuevos knobs
+
 const LLM_TRIM_HISTORY_TURNS = parseInt(process.env.LLM_TRIM_HISTORY_TURNS || "12", 10);
 const LLM_MAX_CHUNKS        = parseInt(process.env.LLM_MAX_CHUNKS || "5", 10);
 const LLM_MAX_DESC_CHARS    = parseInt(process.env.LLM_MAX_DESC_CHARS || "1200", 10);
@@ -63,7 +63,7 @@ export async function getCompletion(input: CompletionInput): Promise<CompletionO
     user: input.user
   });
 
-  // 👀 logs útiles
+  // logs 
   if (VERBOSE) {
     console.log("[llm] history msgs:", trimmedHistory.length, "chunks:", compactChunks.length);
     try {
@@ -88,21 +88,73 @@ export async function getCompletion(input: CompletionInput): Promise<CompletionO
 
 /** Destilado de memoria larga cada N turnos */
 export async function maybeDistillAndPersist(chatId: string, systemPrompt: string) {
-  const turns = await getMemoryAsMessages(chatId, 999);
+  // 1) Trae los turnos con meta para poder leer shownSources
+  const turns = await getRecentTurns(chatId, 999);
   if (turns.length < DISTILL_EVERY_TURNS * 2) return;
 
+  // 2) Whitelist de fuentes realmente mostradas al usuario
+  const shown = new Set<string>();
+  for (const t of turns) {
+    const arr = t.meta?.shownSources as string[] | undefined;
+    if (Array.isArray(arr)) {
+      for (const u of arr) if (u) shown.add(u);
+    }
+  }
+  const shownList = Array.from(shown);
+
+  // 3) Resumen previo (si existe) para continuidad
+  const previous = await getLongSummary(chatId).catch(() => null);
+
+  // 4) Construye el prompt de destilado (solo texto visible de user/assistant)
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "system",
+      content: [
+        "Eres un destilador de memoria larga.",
+        "Reglas:",
+        "• Usa únicamente lo que el USUARIO dijo y lo que el ASISTENTE respondió (texto visible).",
+        "• No utilices información del contexto recuperado que no se haya mostrado.",
+        "• Si mencionas fuentes/URLs, usa EXCLUSIVAMENTE las listadas en 'Fuentes mostradas'.",
+        "• No inventes nada.",
+        "• Guarda solo datos estables del usuario: preferencias, requisitos, decisiones y restricciones.",
+        "• Devuelve 5–8 bullets, concisos y accionables.",
+      ].join("\n"),
+    },
+  ];
+
+  if (previous) {
+    messages.push({
+      role: "system",
+      content: `Resumen previo (para continuidad, no lo repitas tal cual):\n${previous}`,
+    });
+  }
+
+  if (shownList.length) {
+    messages.push({
+      role: "system",
+      content: `Fuentes mostradas (whitelist):\n${shownList.map((u) => `- ${u}`).join("\n")}`,
+    });
+  }
+
+  // Conversación visible (solo texto)
+  for (const t of turns) {
+    messages.push({ role: "user", content: t.user });
+    messages.push({ role: "assistant", content: t.assistant });
+  }
+
+  messages.push({ role: "user", content: "Genera el resumen ahora." });
+
+  // 5) Llama al modelo
   const res = await openai.chat.completions.create({
     model: CHAT_MODEL,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "system", content: "Resume de forma concisa (5-8 bullets) los puntos relevantes y decisiones del usuario. No inventes nada." },
-      ...turns,
-      { role: "user", content: "Genera el resumen ahora." }
-    ],
+    messages,
     max_tokens: Math.min(LLM_MAX_TOKENS, 600),
-    temperature: 0.1
+    temperature: 0.1,
   });
 
   const distilled = res.choices[0]?.message?.content?.trim();
-  if (distilled) await upsertLongSummary(chatId, distilled);
+  if (distilled) {
+    await upsertLongSummary(chatId, distilled);
+  }
 }
