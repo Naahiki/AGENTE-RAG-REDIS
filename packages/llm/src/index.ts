@@ -6,7 +6,7 @@ export { loadSystemPromptFromLLM } from "./system";
 
 import OpenAI from "openai";
 import { buildMessages } from "./prompt";
-import { getLongSummary, upsertLongSummary, getMemoryAsMessages } from "../../memory/src/index"; // TEMP local
+import { getLongSummary, upsertLongSummary, getMemoryAsMessages } from "../../memory/src";
 
 const CHAT_MODEL = process.env.CHAT_MODEL || "gpt-4o-mini";
 const DISTILL_EVERY_TURNS = parseInt(process.env.DISTILL_EVERY_TURNS || "12", 10);

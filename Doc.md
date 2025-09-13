@@ -139,7 +139,50 @@ Orden y *timeouts*:
 
 ## Redis
 
-* **Levantado con Docker** (Redis + opcional RedisInsight en `localhost:8001`).
+# Redis (persistencia activada con AOF)
+
+* **Levantado con Docker** (Redis + **RedisInsight opcional** en `http://localhost:8001`).
+    * **Imagen**: `redis/redis-stack:latest`.
+    * **Puertos**: `6379` (Redis) y `8001` (RedisInsight).
+    * **Persistencia**: volumen `redis_data` montado en `/data`.
+    * **AOF habilitado**:
+
+    * `appendonly yes`
+    * `appendfsync everysec` (seguridad + buen rendimiento).
+    * **Formato AOF (Redis 7)**: **multiparte**. En lugar de un único `appendonly.aof`, Redis usa un **directorio** (`/data/appendonlydir`) con:
+
+    * `appendonly.aof.manifest`
+    * ficheros base/incrementales (`00000001.base.rdb`, `00000002.incr.aof`, …)
+
+    ### Verificación rápida
+
+    1. Comprobar configuración:
+
+    ```bash
+    docker exec -it redis-stack redis-cli CONFIG GET appendonly
+    docker exec -it redis-stack redis-cli CONFIG GET appendfsync
+    docker exec -it redis-stack redis-cli INFO persistence
+    ```
+
+    Debe verse `aof_enabled:1`.
+
+    2. Forzar escritura AOF y listar ficheros:
+
+    ```bash
+    docker exec -it redis-stack redis-cli SET testkey 123
+    docker exec -it redis-stack redis-cli BGREWRITEAOF
+    docker exec -it redis-stack sh -lc "ls -la /data; echo '---'; ls -la /data/appendonlydir"
+    ```
+
+    3. Probar persistencia tras reinicio:
+
+    ```bash
+    docker compose restart redis
+    docker exec -it redis-stack redis-cli GET testkey  # → "123"
+    ```
+
+    > Estado actual: **AOF activo y verificado** (clave `testkey → "123"` recuperada tras reinicio).
+
 * **RAG**: creaste un **índice RediSearch** para los documentos **“ayuda”** (los datos vienen de Neon vía ETL).
 * **Memoria/caché**:
 

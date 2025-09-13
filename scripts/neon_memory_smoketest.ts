@@ -15,10 +15,12 @@ async function main() {
   const chatId = `smoke-${Date.now()}`;
 
   // 1) Inserta 2 mensajes (auditoría)
-  await db.insert(chatMessages).values([
-    { chat_id: chatId, role: "user",      content: "Hola, ¿qué ayudas hay?",       meta: JSON.stringify({ t: Date.now() }) },
-    { chat_id: chatId, role: "assistant", content: "Existen Bonos Impulsa...",     meta: JSON.stringify({ sources: ["https://www.navarra.es/..."] }) },
-  ]);
+  await db.insert(chatMessages).values(
+    { chat_id: chatId, role: "user",      content: "Hola, ¿qué ayudas hay?",       meta: { t: Date.now() } }
+  );
+  await db.insert(chatMessages).values(
+    { chat_id: chatId, role: "assistant", content: "Existen Bonos Impulsa...",     meta: { sources: ["https://www.navarra.es/..."] } }
+  );
 
   // 2) UPSERT simple del resumen largo
   const existing = await db.select().from(memorySummaries).where(eq(memorySummaries.chat_id, chatId));
