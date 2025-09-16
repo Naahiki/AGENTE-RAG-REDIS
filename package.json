@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "crawl:smoke": "tsx packages/crawler/scripts/smoke-crawl.ts",
+    "pipeline:one": "tsx packages/crawler/scripts/pipeline-dry-run.ts",
+    "crawler:once": "tsx packages/crawler/src/index.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.1",
@@ -19,7 +22,7 @@
   "devDependencies": {
     "@agent-rag/memory": "workspace:*",
     "@agent-rag/llm": "workspace:*",
-	"@agent-rag/sources": "workspace:*",
+    "@agent-rag/sources": "workspace:*",
     "@agent-rag/cache": "workspace:*",
     "@agent-rag/retriever": "workspace:*",
     "@agent-rag/core": "workspace:*",

@@ -13,10 +13,10 @@ export function detectPreLLM(query: string, docs: any[]): GuardrailType[] {
   if (!GUARD_cfg.enabled) return [];
   const out: GuardrailType[] = [];
 
-  // 👇 prioridad absoluta: saludo
+  
   if (isGreeting(query)) {
     out.push("GREETING");
-    return out; // corta aquí, no queremos OUT_OF_SCOPE para un saludo
+    return out;
   }
 
   if ((docs?.length || 0) < GUARD_cfg.ragMinDocs) {
