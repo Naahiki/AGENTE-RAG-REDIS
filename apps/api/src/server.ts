@@ -4,18 +4,18 @@ import "./boot";
 import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import { handleTurn } from "@agent-rag/core";  // 👈 aquí
+import { handleTurn } from "@agent-rag/core";
+import adminRouter from "./admin/router"; // 👈 default import
+
+dotenv.config();
 
 const app = express();
 
-// CORS: permite tu web en producción
-app.use(cors({
-  origin: process.env.WEB_ORIGIN || true, // ej: "http://localhost:5173"
-}));
-
+app.use(cors({ origin: process.env.WEB_ORIGIN || true }));
 app.use(express.json());
 app.use(rateLimit({ windowMs: 60_000, max: 30 }));
 
+// chat (si lo usas)
 app.post("/chat", async (req, res) => {
   try {
     const { chatId, message } = req.body || {};
@@ -23,7 +23,6 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "chatId y message son obligatorios" });
     }
     const out = await handleTurn({ chatId, message });
-    // Si tu front espera {type, content, sources, model}, esto ya vale:
     res.json(out);
   } catch (e: any) {
     console.error("[/chat] error:", e);
@@ -32,6 +31,9 @@ app.post("/chat", async (req, res) => {
 });
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
+
+// Admin router
+app.use(adminRouter);
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

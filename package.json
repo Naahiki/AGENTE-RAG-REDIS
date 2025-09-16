@@ -10,10 +10,10 @@
     "crawler:once": "tsx packages/crawler/src/index.ts"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.1",
+    "@neondatabase/serverless": "0.10.4",
     "@upstash/redis": "^1.35.3",
     "dotenv": "^17.2.2",
-    "drizzle-orm": "^0.44.5",
+    "drizzle-orm": "0.44.5",
     "js-yaml": "^4.1.0",
     "openai": "^5.20.1",
     "redis": "^5.8.2",
@@ -30,5 +30,11 @@
     "@types/node": "^24.3.1",
     "drizzle-kit": "^0.31.4",
     "tsx": "^4.20.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "drizzle-orm": "0.44.5",
+      "@neondatabase/serverless": "0.10.4"
+    }
   }
 }

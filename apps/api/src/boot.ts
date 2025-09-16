@@ -1,17 +1,22 @@
 // apps/api/src/boot.ts
 import * as dotenv from "dotenv";
-import path from "node:path";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const here = dirname(fileURLToPath(import.meta.url));
+// .../apps/api/src  -> .../apps/api
+const apiRoot = resolve(here, "..");
+// .../apps/api -> ... (repo root)
+const repoRoot = resolve(apiRoot, "..", "..");
 
-const rootEnv = path.resolve(__dirname, "../../../.env");
-dotenv.config({ path: rootEnv, override: true });
+// 1) Carga .env de la RAÍZ (si no había variables previas)
+dotenv.config({
+  path: resolve(repoRoot, ".env"),
+  override: false,
+});
 
-console.log("[boot] .env file DONDE OSTIAS ESTAS =", rootEnv);
-console.log("[boot] CORE_LLM_TIMEOUT_MS =", process.env.CORE_LLM_TIMEOUT_MS);
-console.log(
-  "[boot] DATABASE_URL =", (process.env.DATABASE_URL || "")
-    .replace(/^(.{12}).+(.{4})$/, "$1…$2") || "(missing)"
-);
+// 2) Carga .env local de apps/api (si existe) para sobreescribir
+dotenv.config({
+  path: resolve(apiRoot, ".env"),
+  override: true,
+});

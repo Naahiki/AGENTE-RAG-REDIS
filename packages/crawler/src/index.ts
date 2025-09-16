@@ -1,14 +1,16 @@
 // packages/crawler/src/index.ts
-import * as dotenv from "dotenv";
-dotenv.config();
+import "dotenv/config";
+
+// ⬅️ exportamos runOnce para que apps/api pueda llamarlo
+export { runOnce } from "./pipeline";
 
 import { CFG } from "./config";
-import { runOnce } from "./pipeline";
+import { runOnce as runOnceImpl } from "./pipeline";
 
 async function main() {
   if (!CFG.CRAWLER_CRON) {
-    // modo one-shot
-    await runOnce();
+    // modo one-shot (CLI)
+    await runOnceImpl();
     return;
   }
 
@@ -18,7 +20,7 @@ async function main() {
   cron.schedule(CFG.CRAWLER_CRON, async () => {
     try {
       console.log(`[crawler] tick @ ${new Date().toISOString()}`);
-      await runOnce();
+      await runOnceImpl();
     } catch (e) {
       console.error("[crawler] tick error:", e);
     }
@@ -27,7 +29,11 @@ async function main() {
   console.log("[crawler] cron started; press Ctrl+C to exit");
 }
 
-main().catch((e) => {
-  console.error("[crawler] fatal:", e);
-  process.exit(1);
-});
+// Solo ejecuta main si se llama como script (pnpm crawler:once)
+// y no cuando se importa desde la API.
+if (import.meta.main) {
+  main().catch((e) => {
+    console.error("[crawler] fatal:", e);
+    process.exit(1);
+  });
+}
