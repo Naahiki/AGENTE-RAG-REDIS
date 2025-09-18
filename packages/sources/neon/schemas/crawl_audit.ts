@@ -26,7 +26,6 @@ export const crawlAudit = pgTable(
     http_status: integer("http_status"),
     duration_ms: integer("duration_ms"),
     etag: text("etag"),
-    // ⬇️ RENOMBRADO: header HTTP Last-Modified
     http_last_modified: text("http_last_modified"),
 
     // Huellas del crawl
@@ -35,7 +34,7 @@ export const crawlAudit = pgTable(
     outcome: crawlOutcomeEnum("outcome"),
     content_bytes: integer("content_bytes"),
 
-    // ⬇️ NUEVO: fecha que rascamos del HTML (<span> Última actualización ...)
+    // Fecha visible en la página
     page_last_updated_at: timestamp("page_last_updated_at"),
     page_last_updated_text: text("page_last_updated_text"),
 
@@ -48,7 +47,9 @@ export const crawlAudit = pgTable(
     tsIdx: index("crawl_audit_ts_idx").on(t.ts),
     urlIdx: index("crawl_audit_url_idx").on(t.url),
     outcomeIdx: index("crawl_audit_outcome_idx").on(t.outcome),
-    pageUpdatedAtIdx: index("crawl_audit_page_last_updated_at_idx").on(t.page_last_updated_at),
+    pageUpdatedAtIdx: index("crawl_audit_page_last_updated_at_idx").on(
+      t.page_last_updated_at
+    ),
   })
 );
 

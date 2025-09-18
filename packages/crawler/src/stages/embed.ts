@@ -5,221 +5,158 @@ import { db, schema } from "../db";
 import { OpenAI } from "openai";
 import { eq } from "drizzle-orm";
 
-/**
- * Cliente OpenAI (usa la API key desde config/env)
- */
 const openai = new OpenAI({ apiKey: CFG.OPENAI_API_KEY });
+const DRY = CFG.CRAWLER_DRY_RUN;
 
-/**
- * Ensambla el texto a embeber para una ayuda
- * (misma lógica que tu indexación inicial para mantener compatibilidad semántica).
- */
-function buildEmbeddingText(a: any) {
+// ===== Helpers de texto / presupuesto =====
+const j = (s?: string) => (s ?? "").toString().trim();
+const approxTokens = (s: string) => Math.ceil(s.length / 4); // heurística
+const sliceByTokens = (s: string, maxTokens: number) => {
+  const maxChars = Math.max(0, Math.floor(maxTokens * 4));
+  return s.length > maxChars ? s.slice(0, maxChars) : s;
+};
+
+/** Construye bloques en orden de prioridad (los primeros pesan más en el embedding) */
+function buildBlocks(a: any): string[] {
   return [
-    `Nombre: ${a.nombre ?? ""}`,
-    `Descripción: ${a.descripcion ?? ""}`,
-    `Estado del trámite: ${a.estado_tramite ?? ""}`,
-    `Tipo de trámite: ${a.tipo_tramite ?? ""}`,
-    `Tema y subtema: ${a.tema_subtema ?? ""}`,
-    `Dirigido a: ${a.dirigido_a ?? ""}`,
-    `Normativa: ${a.normativa ?? ""}`,
-    `Documentación: ${a.documentacion ?? ""}`,
-    `Resultados: ${a.resultados ?? ""}`,
-    `Otros: ${a.otros ?? ""}`,
-    `Servicio: ${a.servicio ?? ""}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+    j(a.nombre) && `Nombre: ${j(a.nombre)}`,
+    j(a.estado_tramite) && `Estado: ${j(a.estado_tramite)}`,
+    j(a.url_oficial) && `URL oficial: ${j(a.url_oficial)}`,
+    j(a.descripcion) && `Descripción:\n${j(a.descripcion)}`,
+    j(a.dirigido_a) && `Dirigido a:\n${j(a.dirigido_a)}`,
+    j(a.documentacion) && `Documentación a presentar:\n${j(a.documentacion)}`,
+    j(a.normativa) && `Normativa:\n${j(a.normativa)}`,
+    j(a.resultados) && `Resultados:\n${j(a.resultados)}`,
+    j(a.otros) && `Otros:\n${j(a.otros)}`,
+    j(a.page_last_updated_text) && `Última actualización (página): ${j(a.page_last_updated_text)}`,
+  ].filter(Boolean) as string[];
 }
 
 /**
- * Genera embedding y escribe en Redis:
- * - Histórico (ayuda:{id}:v{content_version}) si EMBEDDER_KEEP_HISTORY=1
- * - Puntero actual (ayuda:{id}) si EMBEDDER_WRITE_CURRENT_POINTER=1
- * Además, persiste auditoría embed_audit (si EMBED_AUDIT_ENABLED=1)
- * y marca la ayuda como embebida en Neon.
+ * Ensambla texto respetando un presupuesto aproximado de tokens.
+ * Intenta añadir bloque a bloque; si el siguiente bloque excede, lo corta.
  */
+function assembleWithBudget(blocks: string[], maxTokens: number): { text: string; clipped: boolean } {
+  const pieces: string[] = [];
+  let used = 0;
+  let clipped = false;
+
+  for (const b of blocks) {
+    const btoks = approxTokens(b) + 2; // margen por \n\n
+    if (used + btoks <= maxTokens) {
+      pieces.push(b);
+      used += btoks;
+    } else {
+      const remaining = Math.max(0, maxTokens - used - 2);
+      if (remaining <= 0) { clipped = true; break; }
+      pieces.push(sliceByTokens(b, remaining));
+      clipped = true;
+      break;
+    }
+  }
+
+  const text = pieces.join("\n\n");
+  return { text, clipped };
+}
+
+/** Genera texto con presupuesto y fallback por si el modelo aún se queja */
+function buildEmbeddingTextWithBudget(a: any, initialBudget = 7800) {
+  const blocks = buildBlocks(a);
+  return assembleWithBudget(blocks, initialBudget);
+}
+
 export async function embedOne(ayuda: any) {
-  try {
-    if (!CFG.EMBEDDER_ENABLED) {
-      await audit(ayuda.id, {
-        ok: false,
-        error: "disabled",
-        wroteHistory: false,
-        wrotePointer: false,
-      });
-      return { ok: false, error: "disabled" };
-    }
+  if (!ayuda?.text_hash) return { ok: false, error: "no_text_hash" };
 
-    const text = buildEmbeddingText(ayuda);
-    if (!text.trim()) {
-      await audit(ayuda.id, {
-        ok: false,
-        error: "empty_text",
-        wroteHistory: false,
-        wrotePointer: false,
-      });
-      return { ok: false, error: "empty_text" };
-    }
-
-    // Solicita embedding
-    const resp = await openai.embeddings.create({
-      model: CFG.EMBEDDING_MODEL,
-      input: text,
-    });
-
-    const vec = resp.data[0]?.embedding as number[] | undefined;
-    if (!vec || !vec.length) {
-      await audit(ayuda.id, {
-        ok: false,
-        error: "no_embedding",
-        wroteHistory: false,
-        wrotePointer: false,
-      });
-      return { ok: false, error: "no_embedding" };
-    }
-
-    // Asegura array float32 (para RediSearch VECTOR/JSON)
-    const embedding = Array.from(new Float32Array(vec));
-    const redis = await getRedis();
-
-    const prefix = CFG.EMBEDDER_REDIS_PREFIX;
-    const version = ayuda.content_version ?? 0;
-    const keyCurrent = `${prefix}:${ayuda.id}`;
-    const keyHist = `${prefix}:${ayuda.id}:v${version}`;
-
-    // Guarda histórico (opcional)
-    let wroteHistory = false;
-    if (CFG.EMBEDDER_KEEP_HISTORY) {
-      await redis.json.set(keyHist, "$", {
-        id: ayuda.id,
-        titulo: ayuda.nombre ?? "",
-        url: ayuda.url_oficial ?? "",
-        descripcion: ayuda.descripcion ?? "",
-        estado_tramite: ayuda.estado_tramite ?? "",
-        tipo_tramite: ayuda.tipo_tramite ?? "",
-        tema_subtema: ayuda.tema_subtema ?? "",
-        dirigido_a: ayuda.dirigido_a ?? "",
-        normativa: ayuda.normativa ?? "",
-        documentacion: ayuda.documentacion ?? "",
-        resultados: ayuda.resultados ?? "",
-        otros: ayuda.otros ?? "",
-        servicio: ayuda.servicio ?? "",
-        metadata: JSON.stringify({
-          tema: ayuda.tema_subtema ?? "",
-          servicio: ayuda.servicio ?? "",
-        }),
-        embedding,
-      });
-      wroteHistory = true;
-    }
-
-    // Actualiza puntero actual (opcional)
-    let wrotePointer = false;
-    if (CFG.EMBEDDER_WRITE_CURRENT_POINTER) {
-      await redis.json.set(keyCurrent, "$", {
-        id: ayuda.id,
-        titulo: ayuda.nombre ?? "",
-        url: ayuda.url_oficial ?? "",
-        descripcion: ayuda.descripcion ?? "",
-        estado_tramite: ayuda.estado_tramite ?? "",
-        tipo_tramite: ayuda.tipo_tramite ?? "",
-        tema_subtema: ayuda.tema_subtema ?? "",
-        dirigido_a: ayuda.dirigido_a ?? "",
-        normativa: ayuda.normativa ?? "",
-        documentacion: ayuda.documentacion ?? "",
-        resultados: ayuda.resultados ?? "",
-        otros: ayuda.otros ?? "",
-        servicio: ayuda.servicio ?? "",
-        metadata: JSON.stringify({
-          tema: ayuda.tema_subtema ?? "",
-          servicio: ayuda.servicio ?? "",
-        }),
-        embedding,
-      });
-      wrotePointer = true;
-    }
-
-    // Marca en Neon el éxito del embed
-    await db
-      .update(schema.ayudas)
-      .set({
-        last_embedded_at: new Date(),
-        last_embed_ok: true,
-        last_error: null,
-      })
-      .where(eq(schema.ayudas.id, ayuda.id));
-
-    // Auditoría
-    await audit(ayuda.id, {
-      ok: true,
-      dim: embedding.length, // 👈 'dim' (no 'dims')
-      wroteHistory,
-      wrotePointer,
-      storeKey: wrotePointer ? keyCurrent : null,
-      storeVersion: version,
-      storePrefix: prefix,
-    });
-
-    return {
-      ok: true,
-      dim: embedding.length,
-      wroteHistory,
-      wrotePointer,
-    };
-  } catch (e: any) {
-    // Marca fallo en Neon
-    await db
-      .update(schema.ayudas)
-      .set({
-        last_embedded_at: new Date(),
-        last_embed_ok: false,
-        last_error: e?.message || String(e),
-      })
-      .where(eq(schema.ayudas.id, ayuda.id));
-
-    // Auditoría de error
-    await audit(ayuda.id, {
-      ok: false,
-      error: e?.message || String(e),
-      wroteHistory: false,
-      wrotePointer: false,
-    });
-
-    return { ok: false, error: e?.message || String(e) };
+  // Idempotencia
+  if (ayuda.last_embedded_text_hash && ayuda.last_embedded_text_hash === ayuda.text_hash) {
+    return { ok: true, skippedBecauseSameHash: true };
   }
-}
 
-/**
- * Inserta registro en embed_audit si EMBED_AUDIT_ENABLED=1
- * - Usa 'dim' (no 'dims') para encajar con el esquema.
- * - 'meta' es JSONB (objeto), no string.
- */
-async function audit(
-  ayuda_id: number,
-  data: {
-    ok: boolean;
-    dim?: number;
-    error?: string | null;
-    wroteHistory?: boolean;
-    wrotePointer?: boolean;
-    storeKey?: string | null;
-    storeVersion?: number | null;
-    storePrefix?: string | null;
+  if (DRY) return { ok: true, dryRun: true };
+
+  // Presupuesto seguro (<8192) con margen
+  let budget = Number(process.env.EMBED_MAX_TOKENS || 7800);
+  let lastErr: any = null;
+  let vec: number[] | undefined;
+  let textBuilt = "";
+  let clipped = false;
+
+  // Hasta 3 reintentos bajando el presupuesto si hiciera falta
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { text, clipped: c } = buildEmbeddingTextWithBudget(ayuda, budget);
+    textBuilt = text;
+    clipped = c;
+
+    try {
+      if (!textBuilt.trim()) return { ok: false, error: "empty_text" };
+
+      const resp = await openai.embeddings.create({
+        input: textBuilt,
+        model: CFG.EMBEDDING_MODEL,
+      });
+
+      vec = resp.data?.[0]?.embedding as number[] | undefined;
+      if (!vec?.length) return { ok: false, error: "no_embedding" };
+      // éxito
+      lastErr = null;
+      break;
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      lastErr = e;
+      // Si es error por contexto, reducimos presupuesto y reintentamos
+      if (/maximum context length|token/i.test(msg)) {
+        budget = Math.floor(budget * 0.7); // reduce 30%
+        continue;
+      }
+      // Otro error: salimos
+      break;
+    }
   }
-) {
-  if (!CFG.EMBED_AUDIT_ENABLED) return;
 
-  await db.insert(schema.embedAudit).values({
-    ayuda_id,
-    ts: new Date(),
-    dim: data.dim ?? null, // ✅ coincide con el esquema
-    error: data.error ?? null,
-    store_key: data.storeKey ?? null,
-    meta: {
-      ok: data.ok,
-      wrote_history: data.wroteHistory ?? false,
-      wrote_pointer: data.wrotePointer ?? false,
-    },
-  });
+  if (!vec) {
+    return { ok: false, error: lastErr?.message || "embed_failed" };
+  }
+
+  // Upsert en Redis (JSON doc único por ayuda)
+  const redis = await getRedis();
+  const key = `${CFG.EMBEDDER_REDIS_PREFIX}:${ayuda.id}`;
+  const float32 = Array.from(new Float32Array(vec));
+
+  const doc = {
+    id: ayuda.id,
+    titulo: ayuda.nombre ?? "",
+    url: ayuda.url_oficial ?? "",
+    descripcion: ayuda.descripcion ?? "",
+    estado_tramite: ayuda.estado_tramite ?? "",
+    tipo_tramite: ayuda.tipo_tramite ?? "",
+    tema_subtema: ayuda.tema_subtema ?? "",
+    dirigido_a: ayuda.dirigido_a ?? "",
+    normativa: ayuda.normativa ?? "",
+    documentacion: ayuda.documentacion ?? "",
+    resultados: ayuda.resultados ?? "",
+    otros: ayuda.otros ?? "",
+    servicio: ayuda.servicio ?? "",
+    metadata: JSON.stringify({
+      version: ayuda.content_version ?? 0,
+      page_last_updated_at: ayuda.page_last_updated_at ?? null,
+      text_hash: ayuda.text_hash,
+      clipped,             // <- indicamos si hubo recorte
+      budget_tokens: budget,
+      text_len: textBuilt.length,
+    }),
+    hash: ayuda.text_hash, // alias
+    embedding: float32,
+  };
+
+  await redis.sendCommand(["JSON.SET", key, "$", JSON.stringify(doc)]);
+
+  await db.update(schema.ayudas).set({
+    last_embedded_at: new Date(),
+    last_embed_ok: true,
+    last_error: null,
+    last_embedded_text_hash: ayuda.text_hash,
+  }).where(eq(schema.ayudas.id, ayuda.id));
+
+  return { ok: true, dims: vec.length, clipped, budget };
 }

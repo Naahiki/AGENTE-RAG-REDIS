@@ -10,7 +10,7 @@ const num = (v: string | undefined, def: number) => {
   return Number.isFinite(n) ? n : def;
 };
 
-export const CFG = {
+export const CFG = Object.freeze({
   // ON/OFF
   CRAWLER_ENABLED: bool(process.env.CRAWLER_ENABLED, true),
   SCRAPER_ENABLED: bool(process.env.SCRAPER_ENABLED, true),
@@ -24,12 +24,16 @@ export const CFG = {
   SCRAPER_MAX_CONCURRENCY: num(process.env.SCRAPER_MAX_CONCURRENCY, 4),
   EMBEDDER_MAX_CONCURRENCY: num(process.env.EMBEDDER_MAX_CONCURRENCY, 2),
 
+  // Política de recrawl (◆ NUEVO)
+  CRAWLER_MAX_AGE_MINUTES: num(process.env.CRAWLER_MAX_AGE_MINUTES, 360),
+
   // Net / robots / timeouts
   CRAWLER_OBEY_ROBOTS: bool(process.env.CRAWLER_OBEY_ROBOTS, true),
   CRAWLER_USER_AGENT: process.env.CRAWLER_USER_AGENT || "AgentRAG/1.0",
   CRAWLER_TIMEOUT_MS: num(process.env.CRAWLER_TIMEOUT_MS, 15000),
   CRAWLER_RETRY: num(process.env.CRAWLER_RETRY, 2),
   CRAWLER_BACKOFF_MS: num(process.env.CRAWLER_BACKOFF_MS, 5000),
+  CRAWLER_ACCEPT_LANGUAGE: process.env.CRAWLER_ACCEPT_LANGUAGE || "es-ES,es;q=0.9", // opcional
 
   // Estrategia de reindexado
   REINDEX_STRATEGY: (process.env.REINDEX_STRATEGY || "incremental") as
@@ -60,6 +64,9 @@ export const CFG = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY!,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || "text-embedding-3-small",
 
+  // Modo pruebas (◆ NUEVO)
+  CRAWLER_DRY_RUN: bool(process.env.CRAWLER_DRY_RUN, false),
+
   // Verbose
   VERBOSE: (process.env.CORE_VERBOSE || "0") === "1",
-};
+});

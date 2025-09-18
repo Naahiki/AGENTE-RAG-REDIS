@@ -1,16 +1,20 @@
+// packages/core/guardrails/types.ts
 export type GuardrailType =
-  | "RAG_EMPTY"
+  | "GREET_ONLY"
   | "VAGUE_QUERY"
+  | "RAG_EMPTY"
   | "OUT_OF_SCOPE"
-  | "LLM_TIMEOUT"
-  | "URL_STRIPPED"
-  | "GREETING";  
+  | "URL_OUT_OF_WHITELIST";
 
-export interface Detection {
-  triggered: GuardrailType[];
-}
+export type DetectInput = {
+  /** Texto del usuario */
+  query: string;
+  /** Número de docs RAG recuperados (para reglas) */
+  ragDocCount?: number;
+};
 
-export interface PostProcessOutcome {
-  content: string;
-  strippedUrls: string[];
-}
+export type DetectResult = {
+  types: GuardrailType[];
+  reason?: "denylist" | "embed_gate" | string;
+  embedScore?: number;
+};

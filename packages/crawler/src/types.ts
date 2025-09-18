@@ -1,3 +1,4 @@
+// packages/crawler/src/types.ts
 export type CrawlOutcome =
   | "UNCHANGED"
   | "SOFT_CHANGED"
@@ -6,48 +7,56 @@ export type CrawlOutcome =
   | "BLOCKED"
   | "ERROR";
 
+export type PageUpdateSource =
+  | "ajax"
+  | "jsonld/meta"
+  | "visible"
+  | "script"   // <-- añadido
+  | "none";
+
 export interface CrawlResult {
   outcome: CrawlOutcome;
   status?: number;
-
-  // Señales HTTP
   etag?: string | null;
-  httpLastModified?: string | null; // <-- antes era lastModified
+  httpLastModified?: string | null;
 
-  // Señales de la página (HTML)
-  pageLastUpdatedAt?: string | null;   // ISO parseado del <span> "Última actualización"
-  pageLastUpdatedText?: string | null; // Texto bruto del span
-  pageUpdateSource?: "ajax" | "jsonld/meta" | "visible" | "none";
-  // Huellas / métricas
-  rawHash?: string | null;        // hash "estable" que guardas en raw_hash
+  pageText?: string | null;
+  pageISO?: string | null;
+  pageUpdateSource?: PageUpdateSource;  // <-- permite "script"
+
+  rawHash?: string | null;
   contentBytes?: number | null;
 
-  // Pipeline
-  html?: string | null;           // solo si cambia o si se fuerza
+  html?: string | null;
   error?: string | null;
-  notes?: Record<string, any>;
+}
+
+export interface ScrapeFields {
+  nombre?: string;
+  estado_tramite?: string;
+  dirigido_a?: string;
+  descripcion?: string;
+  documentacion?: string;
+  normativa?: string;
+  resultados?: string;
+  otros?: string;
 }
 
 export interface ScrapeResult {
-  ok: boolean;
-  changed?: boolean;              // <-- expone si el texto útil ha cambiado
+  ok?: boolean;
+  changed: boolean;
   textHash?: string | null;
-  textLen?: number;
-  fields?: Partial<{
-    descripcion: string;
-    documentacion: string;
-    normativa: string;
-    dirigido_a: string;
-  }>;
-  meta?: Record<string, any>;
-  error?: string | null;
-}
+  textLen?: number | null;
+  lang?: string | null;
 
-export interface EmbedResult {
-  ok: boolean;
-  dims?: number;
+  // NUEVO: lo que hemos extraído del HTML (para imprimir)
+  fields?: ScrapeFields;
+
+  // NUEVO: el patch exacto que se sube a Neon (para imprimir)
+  patch?: Record<string, any>;
+
+  // opcional: el texto concatenado usado para hashing/embeddings
+  text?: string;
+
   error?: string | null;
-  wroteHistory?: boolean;
-  wrotePointer?: boolean;
-  skippedBecauseSameHash?: boolean; // <-- útil para idempotencia
 }

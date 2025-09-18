@@ -43,6 +43,20 @@
       "when": 1757972178927,
       "tag": "0005_fair_thunderbolt_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1758116794288,
+      "tag": "0006_free_switch",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1758117461016,
+      "tag": "0007_amazing_nico_minoru",
+      "breakpoints": true
     }
   ]
 }

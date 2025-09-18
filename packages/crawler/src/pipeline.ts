@@ -5,96 +5,146 @@ import { mapPool } from "./utils/pool";
 import { crawlOne } from "./stages/crawl";
 import { scrapeOne } from "./stages/scrape";
 import { embedOne } from "./stages/embed";
-import { asc, and, isNull, isNotNull, or, lt, eq } from "drizzle-orm";
+import { or, isNull, lt } from "drizzle-orm";
 
 /**
- * Selecciona candidatas a procesar según la estrategia:
- * - full: todas las que tengan url_oficial
- * - incremental: prioriza nunca-crawleadas o las más antiguas (last_crawled_at)
+ * Orquestador:
+ * 1) CRAWL (si nunca o está "viejo")
+ * 2) Compara "Última actualización" visible (texto/ISO). Fallback: outcome del crawler.
+ * 3) SCRAPE sólo si cambió (o primera vez)
+ * 4) EMBED sólo si el texto cambió (scrape.changed === true)
  */
-export async function selectCandidates() {
-  if (CFG.REINDEX_STRATEGY === "full") {
-    const rows = await db
-      .select()
-      .from(schema.ayudas)
-      .where(isNotNull(schema.ayudas.url_oficial))
-      .orderBy(asc(schema.ayudas.last_crawled_at));
-    return rows;
-  }
 
-  // incremental
-  const rows = await db
-    .select()
-    .from(schema.ayudas)
-    .where(isNotNull(schema.ayudas.url_oficial))
-    .orderBy(asc(schema.ayudas.last_crawled_at)); // NULL primero, luego más antiguas
-  return rows;
-}
+export type RunOpts = { onLog?: (line: string, level?: "info" | "error") => void };
 
-export async function runOnce() {
-  if (!CFG.CRAWLER_ENABLED) {
-    console.log("[crawler] disabled by env");
-    return;
-  }
+const MAX_AGE_MINUTES = Number(process.env.CRAWLER_MAX_AGE_MINUTES ?? "360"); // 6h por defecto
+const CRAWL_CONC = CFG.CRAWLER_MAX_CONCURRENCY || 4;
+const SCRAPE_CONC = CFG.SCRAPER_MAX_CONCURRENCY || 4;
+const EMBED_CONC  = CFG.EMBEDDER_MAX_CONCURRENCY || 2;
 
-  const items = await selectCandidates();
-  if (!items.length) {
-    console.log("[crawler] no candidates");
-    return;
-  }
+export async function runOnce(opts: RunOpts = {}) {
+  const log = (s: string, l: "info" | "error" = "info") => {
+    (l === "error" ? console.error : console.log)(`[pipeline] ${s}`);
+    opts.onLog?.(`[pipeline] ${s}`, l);
+  };
 
-  console.log(`[crawler] candidates: ${items.length}`);
+  // 1) Seleccionar ayudas a CRAWLear (si nunca o > X min)
+  const since = new Date(Date.now() - MAX_AGE_MINUTES * 60_000);
 
-  // 1) Crawl en pool (descarga y detección de cambios)
-  const crawlResults = await mapPool(items, CFG.CRAWLER_MAX_CONCURRENCY, async (ayuda) => {
-    const r = await crawlOne(ayuda);
-    return { ayuda, crawl: r };
+  const toCrawl = await db.query.ayudas.findMany({
+    where: or(
+      isNull(schema.ayudas.last_crawled_at),
+      lt(schema.ayudas.last_crawled_at, since)
+    ),
+    columns: {
+      id: true,
+      nombre: true,
+      url_oficial: true,
+
+      // Para comparación por fecha visible
+      page_last_updated_text: true,
+      page_last_updated_at: true,
+
+      // Para saber 1ª vez / embedding
+      text_hash: true,
+      content_version: true,
+      last_scraped_at: true,
+      last_embedded_at: true,
+      last_embedded_text_hash: true,
+    },
+    limit: 500,
   });
 
-  // 2) Scrape SOLO donde haya cambio y tengamos HTML fresco
-  const toScrape = crawlResults.filter(
-    (x) => x.crawl.outcome === "CHANGED" && x.crawl.html
-  );
+  log(`crawl tasks: ${toCrawl.length}`);
 
-  if (CFG.SCRAPER_ENABLED && toScrape.length) {
-    console.log(`[scraper] tasks: ${toScrape.length}`);
+  // 2) CRAWL
+  const crawled: { ayuda: any; crawl: any }[] = [];
+  await mapPool(toCrawl, CRAWL_CONC, async (ayuda) => {
+    const crawl = await crawlOne(ayuda);
+    crawled.push({ ayuda, crawl });
+  });
 
-    await mapPool(toScrape, CFG.SCRAPER_MAX_CONCURRENCY, async (x) => {
-      // Relee la ayuda por si el crawl ha actualizado columnas (etag, raw_hash, etc.)
-      const freshRows = await db
-        .select()
-        .from(schema.ayudas)
-        .where(eq(schema.ayudas.id, x.ayuda.id))
-        .limit(1);
+  // 3) Decidir SCRAPE
+  const toScrape: { ayuda: any; html: string }[] = [];
 
-      const fresh = freshRows[0] ?? x.ayuda;
-      await scrapeOne(fresh, x.crawl.html!);
-    });
-  }
+  for (const { ayuda, crawl } of crawled) {
+    const html = crawl?.html as string | undefined;
+    if (!html) {
+      log(`SCRAPE skip id=${ayuda.id}: no HTML`);
+      continue;
+    }
 
-  // 3) Embed donde haya text_hash nuevo (last_embedded_at < last_scraped_at) o nunca embebidas
-  if (CFG.EMBEDDER_ENABLED) {
-    const toEmbed = await db
-      .select()
-      .from(schema.ayudas)
-      .where(
-        and(
-          isNotNull(schema.ayudas.text_hash),
-          or(
-            isNull(schema.ayudas.last_embedded_at),
-            lt(schema.ayudas.last_embedded_at, schema.ayudas.last_scraped_at)
-          )
-        )
-      )
-      .orderBy(asc(schema.ayudas.last_embedded_at));
+    // Señales "visibles"
+    const prevText = (ayuda.page_last_updated_text ?? null) as string | null;
+    const prevISO = ayuda.page_last_updated_at
+      ? new Date(ayuda.page_last_updated_at).toISOString()
+      : null;
 
-    if (toEmbed.length) {
-      console.log(`[embedder] tasks: ${toEmbed.length}`);
-      await mapPool(toEmbed, CFG.EMBEDDER_MAX_CONCURRENCY, async (a) => {
-        await embedOne(a);
-      });
+    const currText = (crawl.pageText ?? null) as string | null;
+    const currISO = (crawl.pageISO ?? null) as string | null;
+
+    const firstTime = !ayuda.text_hash;
+    const changedByText = !!currText && currText !== prevText;
+    const changedByISO = !!currISO && (!prevISO || currISO > prevISO);
+
+    // Fallback: si la página no expone "Última actualización",
+    // permitimos el outcome del crawler como heurística.
+    const changedByOutcome =
+      (!currText && !currISO) &&
+      (crawl.outcome === "CHANGED" || crawl.outcome === "SOFT_CHANGED");
+
+    if (firstTime || changedByText || changedByISO || changedByOutcome) {
+      const reason = firstTime
+        ? "firstTime"
+        : changedByText
+        ? "pageText"
+        : changedByISO
+        ? "pageISO"
+        : "outcome";
+      log(`SCRAPE gate OK id=${ayuda.id} (${reason})`);
+      toScrape.push({ ayuda, html });
+    } else {
+      log(`SCRAPE skip id=${ayuda.id}: unchanged`);
     }
   }
 
-  console.log("[pipeline] done");
+  log(`scrape tasks: ${toScrape.length}`);
+
+  // 4) SCRAPE (sólo las seleccionadas)
+  const scraped: { ayuda: any; scrape: any }[] = [];
+  await mapPool(toScrape, SCRAPE_CONC, async ({ ayuda, html }) => {
+    const scrape = await scrapeOne(ayuda, html);
+    scraped.push({ ayuda, scrape });
+  });
+
+  // 5) Decidir EMBED:
+  // embed ONLY si el texto cambió (scrape.changed === true).
+  // Pasamos al embedder el objeto combinado con fields + textHash + version siguiente
+  const toEmbed: any[] = [];
+  for (const { ayuda, scrape } of scraped) {
+    if (!scrape?.ok) continue;
+    if (!scrape?.changed) {
+      log(`EMBED skip id=${ayuda.id}: text unchanged`);
+      continue;
+    }
+
+    const nextVersion = (ayuda.content_version ?? 0) + 1;
+    const ayudaForEmbed = {
+      ...ayuda,
+      ...(scrape.fields ?? {}),
+      text_hash: scrape.textHash,      // nuevo hash canónico
+      content_version: nextVersion,    // para metadata en Redis
+    };
+
+    log(`EMBED gate OK id=${ayuda.id} v${nextVersion}`);
+    toEmbed.push(ayudaForEmbed);
+  }
+
+  log(`embed tasks: ${toEmbed.length}`);
+
+  await mapPool(toEmbed, EMBED_CONC, async (ayudaForEmbed) => {
+    await embedOne(ayudaForEmbed);
+  });
+
+  log("done");
 }

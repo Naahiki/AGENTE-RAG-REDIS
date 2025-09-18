@@ -1,13 +1,11 @@
 // apps/api/src/server.ts
-import * as dotenv from "dotenv";
-import "./boot";
+import "./boot"; // <- PRIMERO: carga .env (raíz y local)
+
 import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { handleTurn } from "@agent-rag/core";
-import adminRouter from "./admin/router"; // 👈 default import
-
-dotenv.config();
+import adminRouter from "./admin/router";
 
 const app = express();
 
@@ -15,13 +13,10 @@ app.use(cors({ origin: process.env.WEB_ORIGIN || true }));
 app.use(express.json());
 app.use(rateLimit({ windowMs: 60_000, max: 30 }));
 
-// chat (si lo usas)
 app.post("/chat", async (req, res) => {
   try {
     const { chatId, message } = req.body || {};
-    if (!chatId || !message) {
-      return res.status(400).json({ error: "chatId y message son obligatorios" });
-    }
+    if (!chatId || !message) return res.status(400).json({ error: "chatId y message son obligatorios" });
     const out = await handleTurn({ chatId, message });
     res.json(out);
   } catch (e: any) {
@@ -32,7 +27,6 @@ app.post("/chat", async (req, res) => {
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-// Admin router
 app.use(adminRouter);
 
 const PORT = process.env.PORT || 3001;

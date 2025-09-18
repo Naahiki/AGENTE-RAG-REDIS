@@ -29,7 +29,7 @@ export function ChatMessage({ msg }: { msg: { role: "user"|"assistant"; content:
       )}
 
       {/* Fuentes como chips si el backend las envía en `sources` */}
-      {msg.sources?.length ? (
+      {/* {msg.sources?.length ? (
         <div className="mt-2 flex flex-wrap gap-2">
           {msg.sources.map((u) => (
             <a key={u} href={u} target="_blank" rel="noopener noreferrer"
@@ -38,7 +38,7 @@ export function ChatMessage({ msg }: { msg: { role: "user"|"assistant"; content:
             </a>
           ))}
         </div>
-      ) : null}
+      ) : null} */}
     </div>
   );
 }

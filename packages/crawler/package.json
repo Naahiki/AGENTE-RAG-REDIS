@@ -7,29 +7,22 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./api": {
-      "import": "./src/api.ts",
-      "default": "./src/api.ts"
     }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "dev": "tsx watch src/cli.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/cli.js"
+    "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^0.10.4",
-    "cheerio": "^1.0.0",
-    "cron": "^3.1.9",
+    "cheerio": "^1.1.2",
     "dotenv": "^16.4.5",
     "drizzle-orm": "0.44.5",
     "node-cron": "^4.2.1",
-    "openai": "^4.56.0",
     "p-queue": "^7.4.1",
-    "redis": "^4.7.0",
     "undici": "^6.19.5",
     "zod": "^3.23.8"
   },

@@ -1,0 +1,1 @@
+ALTER TABLE "ayudas" DROP COLUMN "hash_contenido";

@@ -34,6 +34,8 @@ export function buildMessages(opts: {
   history: { role: "user" | "assistant"; content: string }[];
   chunks: Chunk[];
   user: string;
+  urlWhitelist?: string[];            // <— NUEVO
+  ragEmptyBehavior?: "none" | "ask_for_name_or_link"; // <— NUEVO
 }): Msg[] {
   const msgs: Msg[] = [];
 
@@ -41,10 +43,31 @@ export function buildMessages(opts: {
   if (opts.longSummary) msgs.push({ role: "system", content: `Resumen persistente de la conversación:\n${opts.longSummary}` });
   if (opts.shortSummary) msgs.push({ role: "system", content: `Resumen breve reciente:\n${opts.shortSummary}` });
 
-  // historial reciente
+  // Instrucciones de guard/whitelist
+  if (opts.urlWhitelist?.length) {
+    msgs.push({
+      role: "system",
+      content:
+        "Reglas de citación y enlaces:\n" +
+        "- Solo puedes citar o mostrar URLs de esta whitelist.\n" +
+        opts.urlWhitelist.map(u => `  • ${u}`).join("\n"),
+    });
+  }
+  if (opts.ragEmptyBehavior === "ask_for_name_or_link") {
+    msgs.push({
+      role: "system",
+      content: [
+        "No se ha recuperado contexto factual suficiente.",
+        "Antes de responder, pide al usuario el nombre exacto de la ayuda o el enlace oficial.",
+        "No inventes contenido; solicita 1–2 datos mínimos para recuperar la ficha correcta.",
+      ].join("\n")
+    });
+  }
+
+  // historial
   for (const m of opts.history) msgs.push(m as Msg);
 
-  // ⬇️ contexto RAG (fichas completas)
+  // contexto RAG
   if (opts.chunks?.length) {
     const ctx = opts.chunks.map((c, i) => renderChunk(c, i + 1)).join("\n\n");
     msgs.push({
@@ -53,7 +76,7 @@ export function buildMessages(opts: {
     });
   }
 
-  // pregunta actual
+  // pregunta
   msgs.push({ role: "user", content: opts.user });
   return msgs;
 }
