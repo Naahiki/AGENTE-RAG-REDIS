@@ -1,3 +1,4 @@
+// packages/core/src/onboarding/prompts.ts
 import type { OnboardingCheckResult } from "./types";
 
 export function promptFor(field: string): OnboardingCheckResult {
@@ -6,14 +7,14 @@ export function promptFor(field: string): OnboardingCheckResult {
       return {
         shouldAsk: true,
         missingField: "company_size",
-        prompt: "Para afinar, ¿qué tamaño tiene tu empresa?",
+        prompt: "Hola, Para afinar, ¿qué tamaño tiene tu empresa?",
         hint: "Responde en tus palabras (p. ej., «somos 40 personas» o «facturamos ~3M»).",
       };
     case "sector":
       return {
         shouldAsk: true,
         missingField: "sector",
-        prompt: "¿En qué sector operas?",
+        prompt: "Seguimos! ¿En qué sector operas?",
         hint: "Describe tu sector con tus palabras (p. ej., «agroalimentario», «software B2B»…).",
       };
     case "objective":

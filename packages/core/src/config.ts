@@ -12,7 +12,7 @@ export const CORE_RETRIEVER_TIMEOUT_MS = parseInt(process.env.CORE_RETRIEVER_TIM
 export const CORE_LLM_TIMEOUT_MS = parseInt(process.env.CORE_LLM_TIMEOUT_MS || "20000", 10);
 export const UPDATE_SHORT_SUMMARY_EVERY_TURNS = parseInt(process.env.UPDATE_SHORT_SUMMARY_EVERY_TURNS || "6", 10);
 
-/** Intro guiada (onboarding) – todo controlado por .env */
+/** Intro guiada (onboarding) */
 export const INTRO_GUIDE_ENABLED = (process.env.INTRO_GUIDE_ENABLED || "0") === "1";
 export const INTRO_GUIDE_MIN_TURNS = parseInt(process.env.INTRO_GUIDE_MIN_TURNS || "2", 10);
 export const INTRO_GUIDE_REQUIRED = (process.env.INTRO_GUIDE_REQUIRED || "company_size,sector,objective")
@@ -20,6 +20,13 @@ export const INTRO_GUIDE_REQUIRED = (process.env.INTRO_GUIDE_REQUIRED || "compan
   .map((s) => s.trim())
   .filter(Boolean);
 
-/** Guardarraíles: el paquete guardrails ya lee su propia .env, pero
- * desde core mostramos el flag (para logs/decisiones de UI) */
+/** Guardarraíles (solo para logs/decisiones de UI) */
 export const GUARDRAILS_ENABLED = (process.env.GUARDRAILS_ENABLED || "0") === "1";
+
+/** Onboarding */
+export const ONBOARDING_ONLY_IN_SCOPE = (process.env.ONBOARDING_ONLY_IN_SCOPE || "1") === "1";
+export const ONBOARDING_MIN_ANSWERS = parseInt(process.env.ONBOARDING_MIN_ANSWERS || "2", 10);
+export const ONBOARDING_MAX_QUESTIONS = parseInt(process.env.ONBOARDING_MAX_QUESTIONS || "3", 10);
+
+/** Skip retriever (útil en local/test) */
+export const CORE_SKIP_RETRIEVER = (process.env.CORE_SKIP_RETRIEVER || "0") === "1";

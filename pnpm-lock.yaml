@@ -70,9 +70,15 @@ importers:
 
   apps/api:
     dependencies:
+      '@agent-rag/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@agent-rag/crawler':
         specifier: workspace:*
         version: link:../../packages/crawler
+      '@agent-rag/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       cors:
         specifier: ^2.8.5
         version: 2.8.5

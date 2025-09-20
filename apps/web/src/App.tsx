@@ -1,6 +1,7 @@
 import { Routes, Route, NavLink } from "react-router-dom";
 import Chat from "./pages/Chat";
 import Admin from "./pages/Admin";
+import Chat2 from "./pages/Chatguiado";
 
 function MenuLink({ to, label }: { to: string; label: string }) {
   return (
@@ -30,16 +31,19 @@ export default function App() {
           <div className="text-xs opacity-70">Navarra · RAG + Redis</div>
         </div>
         <nav className="p-3 flex flex-col gap-2">
-          <MenuLink to="/" label="Chat" />
+          <MenuLink to="/chat" label="Chat" />
           <MenuLink to="/admin" label="Admin" />
+          <MenuLink to="/intro" label="Chat guiado" />
         </nav>
       </aside>
 
       {/* Main */}
       <main className="flex-1 min-w-0">
         <Routes>
-          <Route path="/" element={<Chat />} />
+          <Route path="/chat" element={<Chat />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/intro" element={<Chat2 />} />
+
         </Routes>
       </main>
     </div>

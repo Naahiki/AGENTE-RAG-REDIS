@@ -1,49 +1,46 @@
-import type { UserProfile } from "./types";
-
-// Claves que nos interesan con alias frecuentes (no imponemos valores)
-const keyAliases: Record<keyof UserProfile, RegExp[]> = {
-  company_size: [
-    /\b(tamaño|tamano|size|company\s*size)\s*:\s*(.+)$/i,
-  ],
-  sector: [
-    /\b(sector|industria|actividad)\s*:\s*(.+)$/i,
-  ],
-  objective: [
-    /\b(objetivo|objetive|goal|propósito|proposito)\s*:\s*(.+)$/i,
-  ],
+// packages/core/src/onboarding/extract.ts
+export type UserProfile = {
+  company_size?: string;
+  sector?: string;
+  objective?: string;
 };
 
-// También soportamos frases tipo "mi sector es ..." o "queremos ..."
-const softPatterns: Array<[keyof UserProfile, RegExp]> = [
-  ["sector", /\b(sector)\s+(es|:)\s+(.+)/i],
-  ["company_size", /\b(somos|tamaño|tamano)\s+(.+)/i],
-  ["objective", /\b(queremos|buscamos|mi objetivo|nuestro objetivo)\s+(.+)/i],
-];
-
-export function extractProfilePatchFromMessage(msg: string): Partial<UserProfile> {
+export function extractProfilePatchFromMessage(
+  msg: string,
+  ctx?: { expecting?: keyof UserProfile }
+): Partial<UserProfile> {
   const patch: Partial<UserProfile> = {};
-  const lines = msg.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const text = msg.trim();
 
-  // 1) Busca "clave: valor" en cada línea
-  for (const [field, patterns] of Object.entries(keyAliases) as Array<[keyof UserProfile, RegExp[]]>) {
-    for (const p of patterns) {
-      for (const line of lines) {
-        const m = line.match(p);
-        if (m?.[2]) {
-          const value = m[2].trim();
-          if (value) patch[field] = truncate(value, 200);
-        }
-      }
-    }
+  // 0) Si tenemos "expecting", hacemos parsing contextual robusto.
+  if (ctx?.expecting === "company_size") {
+    // "15 empleados", "15 emp", "somos 15", "facturamos 3M"
+    const m1 = text.match(/\b(\d{1,4})\s*(emplead[oa]s?|emp\.?)\b/i);
+    if (m1) patch.company_size = `${m1[1]} empleados`;
+    const m2 = text.match(/\bfactur(a|amos)\s+~?\s*([\d.,]+)\s*m\b/i); // "facturamos 5 m"
+    if (m2) patch.company_size = `facturación ~${m2[2]}M`;
+    const m3 = text.match(/\bsomos\s+(\d{1,4})\b/i); // "somos 20"
+    if (m3) patch.company_size = `${m3[1]} empleados`;
+  } else if (ctx?.expecting === "sector") {
+    // respuestas tipo "agroalimentario", "software b2b", etc.
+    if (text.length <= 80 && /\b\w/.test(text)) patch.sector = text;
+  } else if (ctx?.expecting === "objective") {
+    // "internacionalizar", "contratar comercial", "entrar en Alemania"
+    if (text.length <= 140 && /\b\w/.test(text)) patch.objective = text;
   }
 
-  // 2) Heurística suave en el texto completo (frases naturales)
-  const full = msg.trim();
-  for (const [field, rx] of softPatterns) {
-    const m = full.match(rx);
-    if (m) {
-      const val = (m[3] ?? m[2] ?? "").trim();
-      if (val) patch[field] = truncate(val, 200);
+  // 1) clave: valor (fallback general)
+  const rx = /\b(company_size|tamaño|tamano|sector|objective|objetivo)\s*[:=]\s*([^\n,.;]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(text)) !== null) {
+    const kRaw = m[1].toLowerCase().trim();
+    const v = m[2].trim();
+    const k =
+      kRaw === "tamaño" || kRaw === "tamano" ? "company_size" :
+      kRaw === "objetivo" ? "objective" :
+      kRaw;
+    if (["company_size", "sector", "objective"].includes(k) && v) {
+      (patch as any)[k] = truncate(v, 200);
     }
   }
 

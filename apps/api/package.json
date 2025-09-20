@@ -11,7 +11,9 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.4.0",
     "zod": "^3.25.76",
-    "@agent-rag/crawler": "workspace:*"
+    "@agent-rag/crawler": "workspace:*",
+    "@agent-rag/core": "workspace:*",
+    "@agent-rag/memory": "workspace:*"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
