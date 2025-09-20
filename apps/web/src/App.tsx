@@ -31,9 +31,9 @@ export default function App() {
           <div className="text-xs opacity-70">Navarra · RAG + Redis</div>
         </div>
         <nav className="p-3 flex flex-col gap-2">
-          <MenuLink to="/chat" label="Chat" />
+          {/* <MenuLink to="/chat" label="Chat" /> */}
           <MenuLink to="/admin" label="Admin" />
-          <MenuLink to="/intro" label="Chat guiado" />
+          <MenuLink to="/intro" label="Chat" />
         </nav>
       </aside>
 

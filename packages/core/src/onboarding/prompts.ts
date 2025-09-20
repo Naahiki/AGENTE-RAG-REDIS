@@ -1,30 +1,25 @@
 // packages/core/src/onboarding/prompts.ts
-import type { OnboardingCheckResult } from "./types";
+import type { UserProfile } from "./types";
 
-export function promptFor(field: string): OnboardingCheckResult {
+export function promptFor(field: keyof UserProfile) {
   switch (field) {
     case "company_size":
       return {
-        shouldAsk: true,
-        missingField: "company_size",
-        prompt: "Hola, Para afinar, ¿qué tamaño tiene tu empresa?",
-        hint: "Responde en tus palabras (p. ej., «somos 40 personas» o «facturamos ~3M»).",
+        field,
+        text: "Para empezar, ¿qué tamaño tiene tu empresa?",
+        hint: "Responde libremente (p. ej., «somos 40 personas» o «facturamos ~3M»).",
       };
     case "sector":
       return {
-        shouldAsk: true,
-        missingField: "sector",
-        prompt: "Seguimos! ¿En qué sector operas?",
-        hint: "Describe tu sector con tus palabras (p. ej., «agroalimentario», «software B2B»…).",
+        field,
+        text: "¿En qué sector operas?",
+        hint: "Describe tu sector (p. ej., «agroalimentario», «software B2B»…).",
       };
     case "objective":
       return {
-        shouldAsk: true,
-        missingField: "objective",
-        prompt: "¿Cuál es tu objetivo principal respecto a las ayudas?",
-        hint: "Dilo libremente (p. ej., «contratar equipo comercial», «entrar en Alemania», «automatizar procesos»).",
+        field,
+        text: "¿Cuál es tu objetivo principal respecto a las ayudas?",
+        hint: "Ej.: «contratar equipo comercial», «entrar en Alemania», «automatizar procesos».",
       };
-    default:
-      return { shouldAsk: false };
   }
 }

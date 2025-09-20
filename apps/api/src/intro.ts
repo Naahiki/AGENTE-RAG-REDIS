@@ -6,10 +6,16 @@ import { getProfile, appendTurn, ensureChatSession } from "@agent-rag/memory";
 
 /** Flags .env */
 const INTRO_GUIDE_ENABLED = (process.env.INTRO_GUIDE_ENABLED || "0") === "1";
-const INTRO_GUIDE_REQUIRED = (process.env.INTRO_GUIDE_REQUIRED || "company_size,sector,objective")
-  .split(",").map(s => s.trim()).filter(Boolean);
+const INTRO_GUIDE_REQUIRED = (
+  process.env.INTRO_GUIDE_REQUIRED || "company_size,sector,objective"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
-function promptFor(field: string):
+function promptFor(
+  field: string
+):
   | { shouldAsk: false }
   | { shouldAsk: true; missingField: string; prompt: string; hint?: string } {
   switch (field) {
@@ -39,7 +45,9 @@ function promptFor(field: string):
   }
 }
 
-export async function buildIntroMessage(chatId: string): Promise<{ content: string; sources?: string[] }> {
+export async function buildIntroMessage(
+  chatId: string
+): Promise<{ content: string; sources?: string[] }> {
   if (INTRO_GUIDE_ENABLED) {
     // Asegura sesión y lee perfil
     await ensureChatSession(chatId, null, undefined).catch(() => {});
@@ -55,11 +63,18 @@ export async function buildIntroMessage(chatId: string): Promise<{ content: stri
       if (q.shouldAsk) {
         const content = q.hint ? `${q.prompt}\n\n_${q.hint}_` : q.prompt;
 
-        // 👇 GUARDAMOS la pregunta en memoria con meta para que handleTurn
+        // GUARDAMOS la pregunta en memoria con meta para que handleTurn
         // detecte que el próximo mensaje es respuesta de onboarding
         await appendTurn(chatId, "", content, {
           model: "guided-intro",
-          guidedIntro: { lastAsked: q.missingField, missing, profileSnapshot: profile || {} },
+          meta: {
+            
+            guidedIntro: {
+              lastAsked: q.missingField,
+              missing,
+              profileSnapshot: profile || {},
+            },
+          },
         });
 
         return { content };

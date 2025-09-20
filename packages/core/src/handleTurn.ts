@@ -1,30 +1,8 @@
 // packages/core/src/handleTurn.ts
-import {
-  CORE_VERBOSE,
-  RETRIEVER_TOP_K,
-  UPDATE_SHORT_SUMMARY_EVERY_TURNS,
-  CORE_RETRIEVER_TIMEOUT_MS,
-  CORE_LLM_TIMEOUT_MS,
-  INTRO_GUIDE_ENABLED,
-  INTRO_GUIDE_MIN_TURNS, // (si lo usas en otro punto, aquí queda a mano)
-  CORE_SKIP_RETRIEVER,
-  ONBOARDING_ONLY_IN_SCOPE,
-  ONBOARDING_MIN_ANSWERS,
-  ONBOARDING_MAX_QUESTIONS,
-  INTRO_GUIDE_REQUIRED,
-} from "./config";
-
+import { CFG } from "./config";
 import { withTimeout } from "./time";
 import { makeFallbackFromChunks } from "./fallback";
 
-/** perfil + onboarding **/
-import { augmentQueryWithProfile } from "./profile";
-import { extractProfilePatchFromMessage, type UserProfile } from "./onboarding/extract";
-import { promptFor } from "./onboarding/prompts";
-import { buildOnboardingQuery } from "./onboarding/query";
-import { getLastAskedField, pickNextField } from "./onboarding/state";
-
-/** cache + retriever + memory **/
 import { getCachedAnswer, cacheAnswer } from "../../cache/src";
 import { retrieveRelevantDocs } from "../../retriever/src";
 import {
@@ -39,208 +17,289 @@ import {
   type RetrievalRecord,
 } from "../../memory/src";
 
-/** LLM **/
 import { getCompletion, loadSystemPromptFromLLM } from "../../llm/src";
 
-/** Guardarraíles **/
-import { applyGuardrailsPreLLM } from "./guardrails";
+import {
+  buildOnboardingQuery,
+  augmentQueryWithProfile,
+} from "./rag/buildQuery";
+import { getStatus } from "./onboarding/fsm";
+import { extractPatch } from "./onboarding/extractor";
+import type { UserProfile } from "./onboarding/types";
 
-export type HandleTurnInput = { chatId: string; userId?: string | null; message: string };
-export type HandleTurnOutput = { type: "cached" | "generated"; content: string; sources?: string[]; model?: string };
+import { applyPreSafety } from "./guardrails/preSafety";
+import { applyPostScope } from "./guardrails/postScope";
+import { promptFor } from "./onboarding/prompts";
 
-// Utilidad de logging con prefijo uniforme
-function dbg(...args: any[]) {
-  if (CORE_VERBOSE) console.log("[core]", ...args);
-}
+export type HandleTurnInput = {
+  chatId: string;
+  userId?: string | null;
+  message: string;
+};
+export type HandleTurnOutput = {
+  type: "cached" | "generated";
+  content: string;
+  sources?: string[];
+  model?: string;
+};
 
-export async function handleTurn(input: HandleTurnInput): Promise<HandleTurnOutput> {
+const dbg = (...a: any[]) => {
+  if (CFG.VERBOSE) console.log("[core]", ...a);
+};
+
+export async function handleTurn(
+  input: HandleTurnInput
+): Promise<HandleTurnOutput> {
   const { chatId, message } = input;
-
-  if (CORE_VERBOSE) console.time(`[core] total`);
+  if (CFG.VERBOSE) console.time("[core] total");
   try {
-    dbg(`chatId=${chatId}`);
+    dbg("config", CFG);
 
-    // Dump de flags críticos al inicio de cada turno
-    dbg(
-      "config:",
-      JSON.stringify(
-        {
-          INTRO_GUIDE_ENABLED,
-          INTRO_GUIDE_MIN_TURNS,
-          INTRO_GUIDE_REQUIRED,
-          ONBOARDING_MIN_ANSWERS,
-          ONBOARDING_MAX_QUESTIONS,
-          ONBOARDING_ONLY_IN_SCOPE,
-          CORE_SKIP_RETRIEVER,
-          RETRIEVER_TOP_K,
-          CORE_RETRIEVER_TIMEOUT_MS,
-          CORE_LLM_TIMEOUT_MS,
-        },
-        null,
-        2
-      )
-    );
-
-    // 0) Sesión (best-effort)
+    // 0) Sesión
     ensureChatSession(chatId, null, undefined).catch(() => {});
 
     // 1) Cache exacta
-    if (CORE_VERBOSE) console.time(`[core] cache:get`);
-    const cached = await withTimeout(getCachedAnswer(message), 3000, "cache:get");
-    if (CORE_VERBOSE) console.timeEnd(`[core] cache:get`);
+    const cached = await withTimeout(
+      getCachedAnswer(message),
+      3000,
+      "cache:get"
+    );
     if (cached) {
-      dbg(`HIT cache → model=${cached.model} | sources=${(cached.sources || []).length}`);
       await appendTurn(chatId, message, cached.answer, {
         sources: cached.sources,
         hitCache: true,
         model: cached.model,
       });
       touchChatSession(chatId).catch(() => {});
-      return { type: "cached", content: cached.answer, sources: cached.sources, model: cached.model };
+      return {
+        type: "cached",
+        content: cached.answer,
+        sources: cached.sources,
+        model: cached.model,
+      };
     }
 
-    // 2) Memoria y perfil (con patch usando el campo esperado, si lo hay)
-    if (CORE_VERBOSE) console.time(`[core] memory:get`);
-    const history = await withTimeout(getMemoryAsMessages(chatId), 4000, "memory:getHistory");
-    const shortSummary = await withTimeout(getShortSummary(chatId), 2000, "memory:getShortSummary");
-    if (CORE_VERBOSE) console.timeEnd(`[core] memory:get`);
+    // 2) Memoria + perfil
+    const history = await withTimeout(
+      getMemoryAsMessages(chatId),
+      4000,
+      "memory:getHistory"
+    );
+    const shortSummary = await withTimeout(
+      getShortSummary(chatId),
+      2000,
+      "memory:getShortSummary"
+    );
 
-    // ¿El assistant preguntó algo de onboarding en el turno previo?
-    const expecting = INTRO_GUIDE_ENABLED ? getLastAskedField(history as any) : null;
-    const isOnboardingReply = !!expecting;
-    dbg(`onboarding: enabled=${!!INTRO_GUIDE_ENABLED} | isReply=${isOnboardingReply} | expecting=${expecting || "-"}`);
+    // Detectar última pregunta de onboarding (meta nueva/legacy o por texto)
+    const expecting = detectLastAskedField(history);
+    dbg("onboarding: expecting=%s", expecting || "-");
 
-    // Patch contextual (si hay expecting, el extractor sabe interpretarlo)
-    const userPatch = extractProfilePatchFromMessage(message, isOnboardingReply ? { expecting } : undefined);
-    if (Object.keys(userPatch).length) {
-      dbg("onboarding: patch →", userPatch);
-      await saveProfilePatch(chatId, userPatch);
-    }
+    // Extraer patch si procede y guardar
+    const patch = CFG.INTRO.ENABLED
+      ? extractPatch(message, expecting as any)
+      : {};
+    const wasAnsweredThisTurn = Object.keys(patch).length > 0;
+    dbg("onboarding: patch=", patch);
+    if (wasAnsweredThisTurn) await saveProfilePatch(chatId, patch);
 
-    // Perfil saneado (snapshot tras patch)
-    let profile = ((await getProfile(chatId)) || {}) as Partial<UserProfile>;
-    dbg("profile snapshot:", profile);
+    // Snapshot de perfil tras patch
+    const profile = ((await getProfile(chatId)) || {}) as Partial<UserProfile>;
+    dbg("onboarding: profile snapshot=", profile);
 
-    /* ==========================================================
-       3) Onboarding (mini-entrevista: 1 pregunta por turno) — AHORA ANTES QUE GUARDARRAÍLES
-       ========================================================== */
-    if (INTRO_GUIDE_ENABLED) {
-      const p = profile || {};
+    // 3) FSM Onboarding — GATE: no avanzamos hasta MIN_ANSWERS
+    // 3) FSM Onboarding — GATE: no avanzamos hasta MIN_ANSWERS
+    // 3) FSM Onboarding — HARD GATE: no avanzamos hasta MIN_ANSWERS
+    if (CFG.INTRO.ENABLED) {
+      // nº de preguntas de intro vistas recientemente (por meta O por texto)
+      const askedRecently = countRecentOnboardingQuestions(history);
 
-      // ¿Qué campos ya tenemos y cuáles faltan?
-      const answered = INTRO_GUIDE_REQUIRED.filter((k) => (p as any)[k] && String((p as any)[k]).trim() !== "");
-      const missing = INTRO_GUIDE_REQUIRED.filter((k) => !answered.includes(k)) as (keyof UserProfile)[];
-
-      // Lógica de continuidad
-      const continueInterview = isOnboardingReply || answered.length < ONBOARDING_MIN_ANSWERS;
-
-      // Por ahora, si ONBOARDING_ONLY_IN_SCOPE está activo, solo seguimos si es respuesta de onboarding.
-      // (Más adelante podemos afinar para permitir onboarding fuera de scope con heurísticas).
-      const inScopeOk = !ONBOARDING_ONLY_IN_SCOPE || isOnboardingReply;
-
-      // Heurística de “demasiadas preguntas”
-      const askedRecently = history.filter(
-        (m: any) => m.role === "assistant" && /tamañ|tamano|sector|objetiv/i.test(m.content) && /[¿\?]/.test(m.content)
-      ).length;
-      const underQuestionCap = askedRecently < ONBOARDING_MAX_QUESTIONS;
-
-      dbg(
-        "onboarding: answered=%d missing=%d continue=%s inScope=%s askedRecently=%d capOK=%s",
-        answered.length,
-        missing.length,
-        continueInterview,
-        inScopeOk,
-        askedRecently,
-        underQuestionCap
+      // qué campos están contestados y cuáles faltan
+      const required = CFG.INTRO.REQUIRED as (keyof UserProfile)[];
+      const answeredKeys = required.filter(
+        (k) => (profile as any)[k] && String((profile as any)[k]).trim() !== ""
       );
+      const missingKeys = required.filter((k) => !answeredKeys.includes(k));
+      const answeredCount = answeredKeys.length;
 
-      if (inScopeOk && continueInterview && missing.length > 0 && underQuestionCap) {
-        const nextField = pickNextField(p) || (missing[0] as keyof UserProfile);
-        const q = promptFor(nextField);
+      // ✅ HARD-GATE: mientras falten mínimas, NO pasamos a guardrails/RAG
+      if (answeredCount < CFG.INTRO.MIN_ANSWERS && missingKeys.length > 0) {
+        // Anti-repeat: si justo se contestó el expecting en este turno, evítalo
+        const avoid = wasAnsweredThisTurn ? expecting : null;
+        // Prioridad fija: company_size → sector → objective
+        const nextField = pickNextFieldSafe(profile, missingKeys, avoid);
+        dbg(
+          "onboarding(HARD): answered=%d/%d missing=%j nextField=%s askedRecently=%d",
+          answeredCount,
+          CFG.INTRO.MIN_ANSWERS,
+          missingKeys,
+          nextField,
+          askedRecently
+        );
 
-        if (q.shouldAsk) {
-          const content = q.hint ? `${q.prompt}\n\n_${q.hint}_` : q.prompt;
-          dbg("onboarding: asking field =", q.missingField);
+        const p = promptFor(nextField);
+        const content = p.hint ? `${p.text}\n\n_${p.hint}_` : p.text;
 
-          await appendTurn(chatId, message, content, {
-            model: "guided-intro",
+        // Guarda meta en formato nuevo y legacy (compatibilidad)
+        await appendTurn(chatId, message, content, {
+          model: "guided-intro",
+          meta: {
             guidedIntro: {
-              lastAsked: q.missingField,
-              missing,
-              profileSnapshot: p,
+              lastAsked: nextField,
+              missing: missingKeys,
+              profileSnapshot: profile,
             },
-          });
+          },
+          guidedIntro: {
+            lastAsked: nextField,
+            missing: missingKeys,
+            profileSnapshot: profile,
+          },
+        });
 
-          if (!shortSummary || history.length % UPDATE_SHORT_SUMMARY_EVERY_TURNS === 0) {
-            const compact = message.length > 120 ? message.slice(0, 117) + "..." : message;
-            await setShortSummary(chatId, `Tema reciente: ${compact}`);
-          }
-
-          return { type: "generated", content, model: "guided-intro" };
+        if (!shortSummary || history.length % CFG.SUMMARY_EVERY === 0) {
+          const compact =
+            message.length > 120 ? message.slice(0, 117) + "..." : message;
+          await setShortSummary(chatId, `Tema reciente: ${compact}`);
         }
-        // Si promptFor devolviera {shouldAsk:false}, seguimos flujo normal (guardrails → RAG → LLM).
+        return { type: "generated", content, model: "guided-intro" };
+      }
+
+      // 🔁 (Opcional) Una vez alcanzadas las mínimas, ya puedes delegar en la FSM “blanda”
+      // para seguir preguntando campos restantes sin bloquear RAG (si quieres):
+      const status = getStatus({
+        profile,
+        required,
+        minAnswers: CFG.INTRO.MIN_ANSWERS,
+        maxQuestions: CFG.INTRO.MAX_QUESTIONS,
+        askedRecentlyCount: askedRecently,
+        expecting: expecting as any,
+        // Ya no relajamos scope aquí: respetamos ONLY_IN_SCOPE a partir de ahora
+        onlyInScope: CFG.INTRO.ONLY_IN_SCOPE,
+        inScope: true, // si tienes intent-classifier
+      });
+      dbg("onboarding(SOFT): status=", status);
+
+      if (status.state === "ask") {
+        const avoid = wasAnsweredThisTurn ? expecting : null;
+        const nextField = pickNextFieldSafe(
+          profile,
+          status.missing as any,
+          avoid
+        );
+        dbg("onboarding(SOFT): nextField=", nextField);
+
+        const p = promptFor(nextField);
+        const content = p.hint ? `${p.text}\n\n_${p.hint}_` : p.text;
+
+        await appendTurn(chatId, message, content, {
+          model: "guided-intro",
+          meta: {
+            guidedIntro: {
+              lastAsked: nextField,
+              missing: status.missing,
+              profileSnapshot: profile,
+            },
+          },
+          guidedIntro: {
+            lastAsked: nextField,
+            missing: status.missing,
+            profileSnapshot: profile,
+          },
+        });
+
+        if (!shortSummary || history.length % CFG.SUMMARY_EVERY === 0) {
+          const compact =
+            message.length > 120 ? message.slice(0, 117) + "..." : message;
+          await setShortSummary(chatId, `Tema reciente: ${compact}`);
+        }
+        return { type: "generated", content, model: "guided-intro" };
       }
     }
 
-    /* ==========================================================
-       4) Guardarraíles PRE-LLM (solo si NO hubo pregunta de onboarding)
-       ========================================================== */
-    dbg("guardrails: calling pre-LLM… (runs AFTER onboarding decision)");
-    const pre = await applyGuardrailsPreLLM({ query: message, ragDocCount: 0 });
-    dbg("guardrails: result =", {
-      blocked: pre?.blocked ?? false,
-      types: pre?.types ?? [],
-      hasReply: !!pre?.reply,
-    });
-
-    if (pre.blocked) {
-      const content = pre.reply || "Tu consulta no se puede procesar ahora mismo.";
-      dbg("guardrails: BLOCKED → short-circuiting with guardrail reply");
-      await appendTurn(chatId, message, content, { model: "guardrail", guardrails: pre.types });
-      if (!shortSummary || history.length % UPDATE_SHORT_SUMMARY_EVERY_TURNS === 0) {
-        const compact = message.length > 120 ? message.slice(0, 117) + "..." : message;
-        await setShortSummary(chatId, `Tema reciente: ${compact}`);
+    // 4) Guardarraíles PRE-LLM (solo safety)
+    if (CFG.GUARDRAILS.SAFETY_ENABLED) {
+      const pre = await applyPreSafety(message);
+      if (pre.blocked) {
+        const content =
+          pre.reply || "Tu consulta no se puede procesar ahora mismo.";
+        await appendTurn(chatId, message, content, {
+          model: "guardrail:safety",
+          guardrails: pre.types,
+        });
+        await cacheAnswer(message, content, {
+          model: "guardrail:safety",
+          sources: [],
+        });
+        return {
+          type: "generated",
+          content,
+          model: "guardrail:safety",
+          sources: [],
+        };
       }
-      await cacheAnswer(message, content, { model: "guardrail", sources: [] });
-      return { type: "generated", content, model: "guardrail", sources: [] };
     }
 
-    // 5) RAG — construir query con onboarding si ya hay respuestas suficientes
-    const skipRetriever = CORE_SKIP_RETRIEVER;
-    const p2 = (profile || {}) as Partial<UserProfile>;
-    const answeredNow = INTRO_GUIDE_ENABLED
-      ? INTRO_GUIDE_REQUIRED.filter((k) => (p2 as any)[k] && String((p2 as any)[k]).trim() !== "")
+    // 5) RAG
+    const skipRetriever = CFG.RAG.SKIP;
+    const answeredNow = CFG.INTRO.ENABLED
+      ? (CFG.INTRO.REQUIRED as string[]).filter(
+          (k) =>
+            (profile as any)[k] && String((profile as any)[k]).trim() !== ""
+        )
       : [];
-    const useOnboardingQuery = INTRO_GUIDE_ENABLED && answeredNow.length >= ONBOARDING_MIN_ANSWERS;
+    const useOnboardingQuery =
+      CFG.INTRO.ENABLED && answeredNow.length >= CFG.INTRO.MIN_ANSWERS;
 
     const retrieverQuery = useOnboardingQuery
-      ? buildOnboardingQuery(p2, message)
-      : (INTRO_GUIDE_ENABLED ? augmentQueryWithProfile(message, p2) : message);
-
-    dbg("retriever: skip=%s topK=%d useOnboardingQuery=%s", skipRetriever, RETRIEVER_TOP_K, useOnboardingQuery);
-    dbg("retriever: query=\n" + retrieverQuery);
+      ? buildOnboardingQuery(profile, message)
+      : CFG.INTRO.ENABLED
+      ? augmentQueryWithProfile(message, profile)
+      : message;
 
     let docs: any[] = [];
     if (!skipRetriever) {
-      if (CORE_VERBOSE) console.time(`[core] retriever`);
       docs = await withTimeout(
-        retrieveRelevantDocs(retrieverQuery, RETRIEVER_TOP_K),
-        CORE_RETRIEVER_TIMEOUT_MS,
+        retrieveRelevantDocs(retrieverQuery, CFG.RAG.TOP_K),
+        CFG.RAG.TIMEOUT_MS,
         "retriever"
       );
-      if (CORE_VERBOSE) console.timeEnd(`[core] retriever`);
-    } else {
-      dbg("retriever: SKIPPED");
     }
 
-    // --- Fuentes/ids/chunks para UI/LLM
-    const sourceUrls = Array.from(new Set((docs || []).map((d: any) => d.url ?? d.url_oficial).filter(Boolean)));
-    const retrievalRecords: RetrievalRecord[] = (docs || []).map((d: any, i: number) => ({
-      url: (d.url ?? d.url_oficial ?? "") as string,
-      rank: i + 1,
-      score: (d._score ?? d.score ?? null) as number | null,
-      raw_chunk: d ? (d as Record<string, any>) : null,
-    }));
+    // 6) Guardarraíles POST-Retriever (scope & calidad)
+    if (CFG.GUARDRAILS.SCOPE_ENABLED) {
+      const post = applyPostScope({ query: message, ragDocCount: docs.length });
+      if (
+        post.action === "ask_for_name_or_link" ||
+        post.action === "soft_redirect"
+      ) {
+        const content = post.reply;
+        await appendTurn(chatId, message, content, {
+          model: "guardrail:scope",
+        });
+        return {
+          type: "generated",
+          content,
+          model: "guardrail:scope",
+          sources: [],
+        };
+      }
+    }
+
+    // 7) LLM
+    const sourceUrls = Array.from(
+      new Set(
+        (docs || []).map((d: any) => d.url ?? d.url_oficial).filter(Boolean)
+      )
+    );
+    const retrievalRecords: RetrievalRecord[] = (docs || []).map(
+      (d: any, i: number) => ({
+        url: (d.url ?? d.url_oficial ?? "") as string,
+        rank: i + 1,
+        score: (d._score ?? d.score ?? null) as number | null,
+        raw_chunk: d ? (d as Record<string, any>) : null,
+      })
+    );
     const retrievalIds: Array<string | number> = (docs || [])
       .map((d: any) => d.id ?? d.doc_id ?? d.docId ?? d.key ?? null)
       .filter(Boolean);
@@ -259,13 +318,9 @@ export async function handleTurn(input: HandleTurnInput): Promise<HandleTurnOutp
       servicio: d.servicio ?? null,
     }));
 
-    dbg(`retriever: docs=${docs?.length || 0} sources=${sourceUrls.length}`);
-
-    // 6) LLM
-    if (CORE_VERBOSE) console.time(`[core] llm`);
     const systemPrompt = loadSystemPromptFromLLM();
-    const urlWhitelist = sourceUrls; // el prompt del LLM ya respeta esta whitelist
-    const ragEmptyBehavior = (!docs || docs.length === 0) ? "ask_for_name_or_link" : "none";
+    const ragEmptyBehavior =
+      !docs || docs.length === 0 ? "ask_for_name_or_link" : "none";
 
     let content = "";
     let model = "fallback";
@@ -278,47 +333,99 @@ export async function handleTurn(input: HandleTurnInput): Promise<HandleTurnOutp
           shortSummary,
           chunks,
           user: message,
-          urlWhitelist,
+          urlWhitelist: sourceUrls,
           ragEmptyBehavior,
         } as any),
-        CORE_LLM_TIMEOUT_MS,
+        CFG.LLM.TIMEOUT_MS,
         "llm:getCompletion"
       );
       content = out.content;
       model = out.model || "llm";
-      if (CORE_VERBOSE) console.timeEnd(`[core] llm`);
-      dbg("llm: model=%s | content.len=%d", model, content?.length || 0);
-    } catch (e: any) {
-      if (CORE_VERBOSE) {
-        console.warn(`[core] llm error/fallback:`, e?.message || e);
-        console.timeEnd(`[core] llm`);
-      }
+    } catch (_) {
       content = makeFallbackFromChunks(chunks);
-      dbg("llm: FALLBACK from chunks");
     }
 
-    // 7) Persistencias
-    if (CORE_VERBOSE) console.time(`[core] persist`);
+    // 8) Persist
     await appendTurn(chatId, message, content, {
       sources: sourceUrls,
       shownSources: sourceUrls,
-      retrieval: { topK: RETRIEVER_TOP_K, ids: retrievalIds },
+      retrieval: { topK: CFG.RAG.TOP_K, ids: retrievalIds },
       retrievalRecords,
-      retrieverTopK: RETRIEVER_TOP_K,
+      retrieverTopK: CFG.RAG.TOP_K,
       usedRetriever: !skipRetriever,
       model,
     });
-    if (!shortSummary || history.length % UPDATE_SHORT_SUMMARY_EVERY_TURNS === 0) {
-      const compact = message.length > 120 ? message.slice(0, 117) + "..." : message;
+    if (!shortSummary || history.length % CFG.SUMMARY_EVERY === 0) {
+      const compact =
+        message.length > 120 ? message.slice(0, 117) + "..." : message;
       await setShortSummary(chatId, `Tema reciente: ${compact}`);
     }
     await cacheAnswer(message, content, { model, sources: sourceUrls });
     touchChatSession(chatId).catch(() => {});
-    if (CORE_VERBOSE) console.timeEnd(`[core] persist`);
 
-    dbg("return: type=generated model=%s sources=%d", model, sourceUrls.length);
     return { type: "generated", content, sources: sourceUrls, model };
   } finally {
-    if (CORE_VERBOSE) console.timeEnd(`[core] total`);
+    if (CFG.VERBOSE) console.timeEnd("[core] total");
   }
+}
+
+/* ===================== Helpers robustos ===================== */
+
+// Detecta la última pregunta de onboarding:
+// 1) meta.guidedIntro.lastAsked
+// 2) guidedIntro.lastAsked (legacy)
+// 3) contenido de la última pregunta (regex)
+function detectLastAskedField(history: any[]): string | null {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m?.role !== "assistant") continue;
+    if (m?.meta?.guidedIntro?.lastAsked)
+      return String(m.meta.guidedIntro.lastAsked);
+    if (m?.guidedIntro?.lastAsked) return String(m.guidedIntro.lastAsked); // legacy
+    const c = (m?.content || "") as string;
+    // Fallback por texto:
+    if (
+      /\b(tamañ|tamano)\b.*empresa|\bsomos\b.*personas|\bfacturamos\b/i.test(c)
+    )
+      return "company_size";
+    if (/\b(en qué sector|en que sector|sector operas?)\b/i.test(c))
+      return "sector";
+    if (/\bobjetivo principal\b|\brespecto a las ayudas\b/i.test(c))
+      return "objective";
+  }
+  return null;
+}
+
+// Cuenta preguntas recientes de onboarding por meta o por texto
+function countRecentOnboardingQuestions(history: any[]): number {
+  let n = 0;
+  for (let i = Math.max(0, history.length - 10); i < history.length; i++) {
+    const m = history[i];
+    if (m?.role !== "assistant") continue;
+    if (m?.meta?.guidedIntro?.lastAsked || m?.guidedIntro?.lastAsked) {
+      n++;
+      continue;
+    }
+    const c = (m?.content || "") as string;
+    if (
+      /\b(tamañ|tamano)\b.*empresa|\b(en qué sector|en que sector)\b|\bobjetivo principal\b/i.test(
+        c
+      )
+    )
+      n++;
+  }
+  return n;
+}
+
+// Evita repetir el campo recién contestado
+function pickNextFieldSafe(
+  profile: Partial<UserProfile>,
+  missing: (keyof UserProfile)[],
+  avoid?: string | null
+) {
+  const candidates = avoid ? missing.filter((m) => m !== avoid) : missing;
+  // prioridad simple: company_size → sector → objective
+  const order: (keyof UserProfile)[] = ["company_size", "sector", "objective"];
+  const sorted = candidates.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return (sorted[0] || candidates[0] || missing[0]) as keyof UserProfile;
 }
