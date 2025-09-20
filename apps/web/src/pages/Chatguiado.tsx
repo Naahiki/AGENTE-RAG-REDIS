@@ -1,9 +1,13 @@
-// pages/Chatguiado.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-type Msg = { role: "user" | "assistant"; content: string; sources?: string[] };
+type Msg = {
+  role: "user" | "assistant";
+  content: string;
+  sources?: string[];
+  model?: string; // para marcar "guided-intro"
+};
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
@@ -46,36 +50,58 @@ export default function Chatguiado() {
   const [sending, setSending] = useState(false);
   const [loadingIntro, setLoadingIntro] = useState(true);
   const [messages, setMessages] = useState<Msg[]>([]);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [cfg, setCfg] = useState<{ INTRO_GUIDE_ENABLED: boolean } | null>(null);
 
+  // Panel admin: visible con ?admin=1
+  const [admin, setAdmin] = useState(false);
+  const [adminKey, setAdminKey] = useState<string>(() => localStorage.getItem("adminKey") || "");
+  const [savingFlag, setSavingFlag] = useState(false);
+
+  const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, sending, loadingIntro]);
 
-  // 1) Primer mensaje: mini-entrevista desde el backend
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    setAdmin(params.get("admin") === "1");
+  }, []);
+
+  // Cargar config backend
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_URL}/config`);
+        if (r.ok) {
+          setCfg(await r.json());
+        } else {
+          console.error("GET /config status", r.status);
+        }
+      } catch (e) {
+        console.error("GET /config error", e);
+      }
+    })();
+  }, []);
+
+  // Cargar primer mensaje (/intro)
   useEffect(() => {
     let cancelled = false;
-
     async function bootstrap() {
       try {
-        const res = await fetch(
-          `${API_URL}/intro?chatId=${encodeURIComponent(chatId)}`
-        );
+        const res = await fetch(`${API_URL}/intro?chatId=${encodeURIComponent(chatId)}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: { content: string; sources?: string[] } = await res.json();
+        const data: { content: string; sources?: string[]; model?: string } = await res.json();
         if (!cancelled) {
-          setMessages([
-            { role: "assistant", content: data.content, sources: data.sources || [] },
-          ]);
+          setMessages([{ role: "assistant", content: data.content, sources: data.sources || [], model: data.model }]);
         }
       } catch {
         if (!cancelled) {
-          // Fallback si el backend aún no expone /intro
           setMessages([
             {
               role: "assistant",
               content:
                 "Para empezar, ¿qué tamaño tiene tu empresa?\n\n_Responde libremente (p. ej., «somos 40 personas»)._",
+              model: "guided-intro",
             },
           ]);
         }
@@ -83,14 +109,13 @@ export default function Chatguiado() {
         if (!cancelled) setLoadingIntro(false);
       }
     }
-
     bootstrap();
     return () => {
       cancelled = true;
     };
   }, [chatId]);
 
-  // 2) Envío de mensajes del usuario → siempre a /chat
+  // Enviar mensajes → /chat
   async function sendMessage() {
     const text = input.trim();
     if (!text || sending) return;
@@ -106,20 +131,15 @@ export default function Chatguiado() {
         body: JSON.stringify({ chatId, message: text }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: { type: string; content: string; sources?: string[] } =
-        await res.json();
+      const data: { type: string; content: string; sources?: string[]; model?: string } = await res.json();
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: data.content, sources: data.sources || [] },
+        { role: "assistant", content: data.content, sources: data.sources || [], model: data.model },
       ]);
     } catch {
       setMessages((m) => [
         ...m,
-        {
-          role: "assistant",
-          content:
-            "Lo siento, ha ocurrido un error. Intenta de nuevo en unos segundos.",
-        },
+        { role: "assistant", content: "Lo siento, ha ocurrido un error. Intenta de nuevo en unos segundos." },
       ]);
     } finally {
       setSending(false);
@@ -133,6 +153,60 @@ export default function Chatguiado() {
     }
   }
 
+  // === Admin: checkbox simple SIEMPRE clicable ===
+  async function onIntroCheckboxChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const nextChecked = e.target.checked;
+    const current = cfg || { INTRO_GUIDE_ENABLED: false };
+
+    // Si no hay key, la pedimos (y persistimos)
+    let key = adminKey;
+    if (!key) {
+      key = window.prompt("Introduce la ADMIN_KEY del API:") || "";
+      if (!key) {
+        // Revertimos visualmente el checkbox sin tocar backend
+        e.target.checked = current.INTRO_GUIDE_ENABLED;
+        return;
+      }
+      setAdminKey(key);
+      localStorage.setItem("adminKey", key);
+    }
+
+    // Update optimista
+    setCfg({ ...current, INTRO_GUIDE_ENABLED: nextChecked });
+    setSavingFlag(true);
+
+    try {
+      const res = await fetch(`${API_URL}/admin/flags`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Key": key,
+        },
+        body: JSON.stringify({ INTRO_GUIDE_ENABLED: nextChecked }),
+      });
+
+      if (!res.ok) {
+        // Rollback
+        setCfg({ ...current, INTRO_GUIDE_ENABLED: !nextChecked });
+        if (res.status === 401) {
+          alert("No autorizado: la ADMIN_KEY no coincide con el backend.");
+        } else {
+          const text = await res.text().catch(() => "");
+          alert(`Error guardando flags (${res.status}): ${text || "desconocido"}`);
+        }
+        return;
+      }
+
+      const newCfg = await res.json();
+      setCfg(newCfg); // Estado real del servidor
+    } catch {
+      setCfg({ ...current, INTRO_GUIDE_ENABLED: !nextChecked }); // rollback
+      alert("Error de red guardando flags");
+    } finally {
+      setSavingFlag(false);
+    }
+  }
+
   return (
     <div className="min-h-dvh flex flex-col bg-base-100">
       {/* Header */}
@@ -142,6 +216,47 @@ export default function Chatguiado() {
             <span className="text-xl font-semibold">Agente Ayudas Navarra</span>
             <span className="text-xs opacity-70 -mt-1">Chat guiado</span>
           </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* Badge estado intro */}
+          <span
+            className={`badge ${cfg?.INTRO_GUIDE_ENABLED ? "badge-success" : "badge-ghost"} text-xs`}
+            title="Estado del onboarding"
+          >
+            Onboarding: {cfg?.INTRO_GUIDE_ENABLED ? "ON" : "OFF"}
+          </span>
+
+          {/* Panel admin simple (checkbox nativo SIEMPRE clicable) */}
+          {/* {admin && (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                className="input input-bordered input-xs w-44"
+                placeholder="Admin key"
+                value={adminKey}
+                onChange={(e) => {
+                  setAdminKey(e.target.value);
+                  localStorage.setItem("adminKey", e.target.value);
+                }}
+                title="Se guarda en localStorage"
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  id="introToggle"
+                  type="checkbox"
+                  // 👇 NUNCA deshabilitamos el checkbox; así siempre es clicable
+                  checked={!!cfg?.INTRO_GUIDE_ENABLED}
+                  onChange={onIntroCheckboxChange}
+                  style={{ cursor: "pointer" }}
+                />
+                <label htmlFor="introToggle" style={{ cursor: "pointer" }}>
+                  Intro
+                </label>
+                {savingFlag && <span className="loading loading-dots loading-xs" />}
+              </div>
+            </div>
+          )} */}
         </div>
       </header>
 
@@ -157,14 +272,14 @@ export default function Chatguiado() {
           )}
 
           {messages.map((m, i) => (
-            <div
-              key={i}
-              className={`chat ${m.role === "assistant" ? "chat-start" : "chat-end"}`}
-            >
+            <div key={i} className={`chat ${m.role === "assistant" ? "chat-start" : "chat-end"}`}>
               <div className="chat-bubble max-w-[90%] prose prose-sm dark:prose-invert">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {m.content}
-                </ReactMarkdown>
+                {m.role === "assistant" && m.model === "guided-intro" && (
+                  <div className="mb-1">
+                    <span className="badge badge-info badge-sm">Onboarding</span>
+                  </div>
+                )}
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                 {!!m.sources?.length && <SourcesCollapse sources={m.sources} />}
               </div>
             </div>

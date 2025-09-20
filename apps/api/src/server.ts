@@ -7,10 +7,15 @@ import rateLimit from "express-rate-limit";
 import { handleTurn } from "@agent-rag/core";
 import adminRouter from "./admin/router";
 import { buildIntroMessage } from "./intro";
-
+import { getRuntimeFlags, setRuntimeFlags } from "./config";
+const ADMIN_KEY = process.env.ADMIN_KEY || "";
 const app = express();
 
-app.use(cors({ origin: process.env.WEB_ORIGIN || true }));
+app.use(cors({
+  origin: process.env.WEB_ORIGIN || true,
+  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","X-Admin-Key"],
+}));
 app.use(express.json());
 app.use(rateLimit({ windowMs: 60_000, max: 30 }));
 
@@ -25,6 +30,8 @@ app.get("/intro", async (req, res) => {
     res.status(500).json({ error: "internal_error", detail: e?.message || String(e) });
   }
 });
+
+
 
 app.post("/chat", async (req, res) => {
   try {
@@ -50,4 +57,29 @@ app.use(adminRouter);
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
+});
+
+
+// GET /config → front lee flags
+app.get("/config", (_req, res) => {
+  const cfg = getRuntimeFlags();
+  res.json({
+    INTRO_GUIDE_ENABLED: cfg.INTRO_GUIDE_ENABLED,
+    INTRO_GUIDE_REQUIRED: cfg.INTRO_GUIDE_REQUIRED,
+    ONBOARDING_MIN_ANSWERS: cfg.ONBOARDING_MIN_ANSWERS,
+    ONBOARDING_MAX_QUESTIONS: cfg.ONBOARDING_MAX_QUESTIONS,
+    ONBOARDING_ONLY_IN_SCOPE: cfg.ONBOARDING_ONLY_IN_SCOPE,
+    GUARDRAILS_SAFETY_ENABLED: cfg.GUARDRAILS_SAFETY_ENABLED,
+    GUARDRAILS_SCOPE_ENABLED: cfg.GUARDRAILS_SCOPE_ENABLED,
+  });
+});
+
+// PUT /admin/flags → cambiar runtime flags (protegido)
+app.put("/admin/flags", (req, res) => {
+  if (!ADMIN_KEY || req.header("X-Admin-Key") !== ADMIN_KEY) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const patch = req.body || {};
+  setRuntimeFlags(patch);
+  return res.json(getRuntimeFlags());
 });
